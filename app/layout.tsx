@@ -1,10 +1,15 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
+import { Golos_Text, IBM_Plex_Mono } from 'next/font/google'
 import './globals.css'
 
+const _golos = Golos_Text({ subsets: ['latin', 'cyrillic'] })
+const _plexMono = IBM_Plex_Mono({ subsets: ['latin', 'cyrillic'], weight: ['400', '500', '600'] })
+
 export const metadata: Metadata = {
-  title: 'v0 App',
-  description: 'Created with v0',
+  title: 'Сверка списков — ФИО и телефоны',
+  description:
+    'Локальная сверка Excel-файлов: нечёткий поиск по ФИО, телефонам и датам рождения, разбор спорных случаев, поиск дублей. Данные не покидают браузер.',
   generator: 'v0.app',
   icons: {
     icon: [
@@ -26,11 +31,8 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'light dark',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: 'white' },
-    { media: '(prefers-color-scheme: dark)', color: 'black' },
-  ],
+  colorScheme: 'light',
+  themeColor: '#f2f3ee',
 }
 
 export default function RootLayout({
@@ -39,8 +41,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className="antialiased">
+    <html lang="ru" className="bg-background">
+      <body className="antialiased font-sans">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
