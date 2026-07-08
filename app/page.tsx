@@ -210,7 +210,15 @@ export default function Page() {
                 type="button"
                 role="radio"
                 aria-checked={mode === m.id}
-                onClick={() => setMode(m.id)}
+                onClick={() => {
+                  setMode(m.id)
+                  setCompareRes(null)
+                  setDupes(null)
+                  setDecisions({})
+                  setProgress(null)
+                  setDownloadNote(null)
+                  setError(null)
+                }}
                 className={`flex flex-col gap-1 rounded-lg border p-4 text-left transition-colors ${
                   mode === m.id ? "border-primary bg-card ring-2 ring-primary/25" : "border-border bg-card hover:border-primary/50"
                 }`}
