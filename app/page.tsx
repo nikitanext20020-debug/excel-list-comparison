@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react"
 import { FileCard } from "@/components/file-card"
 import { ResultsPanel, type Decision } from "@/components/results-panel"
 import { DupesPanel } from "@/components/dupes-panel"
+import { BlurInText } from "@/components/blur-in-text"
+import { AiAssistant } from "@/components/ai-assistant"
 import type { LoadedFile } from "@/lib/xlsx-io"
 import { buildColored, buildExport, buildDupesFile, buildCleanFile, downloadBlob } from "@/lib/xlsx-io"
 import type { Strictness } from "@/lib/matching"
@@ -197,10 +199,10 @@ export default function Page() {
           <h1 className="text-gradient-hero text-lg font-bold tracking-tight">
             Сверка списков{" "}
             <span
-              className="anim-typing text-sm font-normal text-primary"
+              className="text-sm font-normal text-primary"
               style={{ WebkitTextFillColor: "var(--primary)", fontFamily: "system-ui", marginLeft: "10px" }}
             >
-              фио · телефон · дата рождения
+              <BlurInText text="фио · телефон · дата рождения" />
             </span>
           </h1>
           <div className="flex flex-wrap items-center gap-3">
@@ -485,6 +487,22 @@ export default function Page() {
           {downloadNote && <p className="font-mono text-xs text-primary">{downloadNote}</p>}
         </Step>
       </main>
+
+      <AiAssistant
+        context={
+          compareRes
+            ? (() => {
+                const count = (s: string) => compareRes.results.filter((r) => r.res.status === s).length
+                return (
+                  `Режим: ${mode}. Строгость: ${strictness}. Всего строк: ${compareRes.results.length}. ` +
+                  `Найдено точно: ${count("exact")}, с опечаткой: ${count("typo")}, смена фамилии: ${count("namechange")}, ` +
+                  `по телефону: ${count("phone")}, спорных: ${count("disputed")}, не найдено: ${count("notfound")}. ` +
+                  `База: ${compareRes.dbCount} строк.`
+                )
+              })()
+            : undefined
+        }
+      />
 
       <footer className="border-t border-border/60">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-6 xl:px-0">
