@@ -151,146 +151,173 @@
     visibility 0s;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .btn-lift {
-    transition:
-      transform 180ms ease,
-      box-shadow 180ms ease,
-      opacity 180ms ease;
+/* Анимации включены по умолчанию и отключаются только явным запросом
+   reduced-motion (блок в конце файла) — иначе системная настройка
+   «уменьшить движение» молча гасила всё. */
+
+.btn-lift {
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease;
+}
+.btn-lift:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.btn-lift:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* эффект печатной машинки для подзаголовка — зациклен:
+   печатает, держит паузу и начинает заново */
+.anim-typing {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: bottom;
+  border-right: 2px solid var(--primary);
+  animation:
+    typing-loop 9s steps(30, end) 0.4s infinite,
+    caret-blink 0.85s step-end infinite;
+}
+@keyframes typing-loop {
+  0% {
+    max-width: 0;
   }
-  .btn-lift:hover:not(:disabled) {
-    transform: translateY(-1px);
+  30%,
+  92% {
+    max-width: 22em;
   }
-  .btn-lift:active:not(:disabled) {
+  100% {
+    max-width: 0;
+  }
+}
+@keyframes caret-blink {
+  0%,
+  100% {
+    border-color: var(--primary);
+  }
+  50% {
+    border-color: transparent;
+  }
+}
+
+/* мягкая пульсация свечения для бейджа «локально» */
+.anim-pulse-glow {
+  animation: pulse-glow 3.2s ease-in-out infinite;
+}
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 18px rgba(93, 255, 225, 0.1);
+    opacity: 0.88;
+  }
+  50% {
+    box-shadow: 0 0 34px rgba(93, 255, 225, 0.3);
+    opacity: 1;
+  }
+}
+
+/* лёгкое мерцание для строки обновления */
+.anim-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(97, 218, 255, 0.25) 0%,
+    rgba(97, 218, 255, 0.7) 50%,
+    rgba(97, 218, 255, 0.25) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent !important;
+  animation: shimmer-slide 4s linear infinite;
+}
+@keyframes shimmer-slide {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* плавное покачивание иконки Excel */
+.anim-float {
+  animation: icon-float 3.4s ease-in-out infinite;
+}
+@keyframes icon-float {
+  0%,
+  100% {
     transform: translateY(0);
   }
+  50% {
+    transform: translateY(-6px);
+  }
+}
 
-  /* эффект печатной машинки для подзаголовка */
-  .anim-typing {
-    display: inline-block;
-    overflow: hidden;
-    white-space: nowrap;
-    max-width: 0;
-    vertical-align: bottom;
-    border-right: 2px solid var(--primary);
-    animation:
-      typing 2.4s steps(30, end) 0.4s forwards,
-      caret-blink 0.85s step-end 0.4s 8,
-      caret-hide 0.1s linear 7.2s forwards;
-  }
-  @keyframes typing {
-    from {
-      max-width: 0;
-    }
-    to {
-      max-width: 22em;
-    }
-  }
-  @keyframes caret-blink {
-    0%,
-    100% {
-      border-color: var(--primary);
-    }
-    50% {
-      border-color: transparent;
-    }
-  }
-  @keyframes caret-hide {
-    to {
-      border-color: transparent;
-    }
-  }
-
-  /* мягкая пульсация свечения для бейджа «локально» */
-  .anim-pulse-glow {
-    animation: pulse-glow 3.2s ease-in-out infinite;
-  }
-  @keyframes pulse-glow {
-    0%,
-    100% {
-      box-shadow: 0 0 18px rgba(93, 255, 225, 0.1);
-      opacity: 0.88;
-    }
-    50% {
-      box-shadow: 0 0 34px rgba(93, 255, 225, 0.3);
-      opacity: 1;
-    }
-  }
-
-  /* лёгкое мерцание для строки обновления */
-  .anim-shimmer {
-    background: linear-gradient(
-      90deg,
-      rgba(97, 218, 255, 0.25) 0%,
-      rgba(97, 218, 255, 0.7) 50%,
-      rgba(97, 218, 255, 0.25) 100%
-    );
-    background-size: 200% 100%;
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent !important;
-    animation: shimmer-slide 4s linear infinite;
-  }
-  @keyframes shimmer-slide {
-    from {
-      background-position: 200% 0;
-    }
-    to {
-      background-position: -200% 0;
-    }
-  }
-
-  /* плавное покачивание иконки Excel */
-  .anim-float {
-    animation: icon-float 3.4s ease-in-out infinite;
-  }
-  @keyframes icon-float {
-    0%,
-    100% {
-      transform: translateY(0);
-    }
-    50% {
-      transform: translateY(-6px);
-    }
-  }
-
-  /* строки таблицы в иконке проявляются по очереди */
-  .anim-row {
+/* строки таблицы в иконке проявляются по очереди */
+.anim-row {
+  opacity: 0.25;
+  animation: row-pulse 2.6s ease-in-out infinite;
+}
+.anim-row:nth-child(2) {
+  animation-delay: 0.4s;
+}
+.anim-row:nth-child(3) {
+  animation-delay: 0.8s;
+}
+@keyframes row-pulse {
+  0%,
+  100% {
     opacity: 0.25;
-    animation: row-pulse 2.6s ease-in-out infinite;
   }
-  .anim-row:nth-child(2) {
-    animation-delay: 0.4s;
+  40% {
+    opacity: 1;
   }
-  .anim-row:nth-child(3) {
-    animation-delay: 0.8s;
-  }
-  @keyframes row-pulse {
-    0%,
-    100% {
-      opacity: 0.25;
-    }
-    40% {
-      opacity: 1;
-    }
-  }
+}
 
-  /* галочка сверки, рисующаяся штрихом */
-  .anim-check {
-    stroke-dasharray: 24;
+/* галочка сверки, рисующаяся штрихом */
+.anim-check {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: check-draw 2.6s ease-in-out infinite;
+}
+@keyframes check-draw {
+  0% {
     stroke-dashoffset: 24;
-    animation: check-draw 2.6s ease-in-out infinite;
   }
-  @keyframes check-draw {
-    0% {
-      stroke-dashoffset: 24;
-    }
-    45%,
-    75% {
-      stroke-dashoffset: 0;
-    }
-    100% {
-      stroke-dashoffset: 24;
-    }
+  45%,
+  75% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: 24;
+  }
+}
+
+/* при явном запросе «уменьшить движение» останавливаем декоративные анимации */
+@media (prefers-reduced-motion: reduce) {
+  .anim-typing,
+  .anim-pulse-glow,
+  .anim-shimmer,
+  .anim-float,
+  .anim-row,
+  .anim-check {
+    animation: none;
+  }
+  .anim-typing {
+    max-width: none;
+    border-right-color: transparent;
+  }
+  .anim-row {
+    opacity: 1;
+  }
+  .anim-check {
+    stroke-dashoffset: 0;
+  }
+  .btn-lift,
+  .btn-lift:hover:not(:disabled) {
+    transition: none;
+    transform: none;
   }
 }
