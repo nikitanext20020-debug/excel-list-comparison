@@ -133,6 +133,24 @@
   }
 }
 
+/* всплывающая подсказка строгости (вне @layer utilities: Tailwind v4 не выпускает
+   сложные селекторы из этого слоя; без media-hover — работает и на тач-устройствах) */
+.hint-bubble {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 200ms ease 150ms,
+    visibility 0s linear 350ms;
+}
+.hint-trigger:hover .hint-bubble,
+.hint-trigger:focus-visible .hint-bubble {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 200ms ease 150ms,
+    visibility 0s;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .btn-lift {
     transition:

@@ -19,10 +19,25 @@ const MODES: { id: Mode; title: string; desc: string }[] = [
 
 const SWATCHES = ["92D050", "FFFF00", "00B0F0", "FFC000", "F4B6C2"]
 
-const STRICTNESS: { id: Strictness; label: string; desc: string }[] = [
-  { id: "strict", label: "Строгая", desc: "меньше ложных совпадений" },
-  { id: "normal", label: "Обычная", desc: "проверенные пороги" },
-  { id: "soft", label: "Мягкая", desc: "ловит больше опечаток" },
+const STRICTNESS: { id: Strictness; label: string; desc: string; hint: string }[] = [
+  {
+    id: "strict",
+    label: "Строгая",
+    desc: "меньше ложных совпадений",
+    hint: "Совпадением считается почти точное сходство ФИО (от 94%). Разных людей почти никогда не склеит, но реальные опечатки могут уйти в «не найдены». Выбирайте, когда цена ложного совпадения высока.",
+  },
+  {
+    id: "normal",
+    label: "Обычная",
+    desc: "проверенные пороги",
+    hint: "Сбалансированные пороги (сходство ФИО от 90%): ловит типичные опечатки, ё/е и перестановку слов, при этом редко даёт ложные пары. Подходит для большинства сверок.",
+  },
+  {
+    id: "soft",
+    label: "Мягкая",
+    desc: "ловит больше опечаток",
+    hint: "Пониженные пороги (сходство ФИО от 85%): находит больше опечаток и сокращений, но чаще отправляет случаи в «спорные» на ручную проверку. Выбирайте для «грязных» файлов с ошибками ввода.",
+  },
 ]
 
 function Step({ num, title, children }: { num: string; title: string; children: React.ReactNode }) {
@@ -276,8 +291,9 @@ export default function Page() {
                     type="button"
                     role="radio"
                     aria-checked={strictness === s.id}
+                    aria-describedby={`strictness-hint-${s.id}`}
                     onClick={() => setStrictness(s.id)}
-                    className={`btn-lift flex-1 rounded px-3 py-1.5 text-xs font-medium ${
+                    className={`btn-lift hint-trigger relative flex-1 rounded px-3 py-1.5 text-xs font-medium ${
                       strictness === s.id
                         ? "glow-primary-soft bg-primary font-bold text-primary-foreground"
                         : "text-muted-foreground hover:bg-primary/10 hover:text-foreground"
@@ -286,6 +302,13 @@ export default function Page() {
                     {s.label}{" "}
                     <span className={`hidden font-normal sm:inline ${strictness === s.id ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
                       — {s.desc}
+                    </span>
+                    <span
+                      id={`strictness-hint-${s.id}`}
+                      role="tooltip"
+                      className="hint-bubble glow-primary-soft pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 rounded-lg border border-primary/30 bg-popover p-3 text-left text-[11px] font-normal leading-relaxed text-popover-foreground"
+                    >
+                      {s.hint}
                     </span>
                   </button>
                 ))}
