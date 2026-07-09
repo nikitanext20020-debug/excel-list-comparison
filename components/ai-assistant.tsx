@@ -182,21 +182,17 @@ export function AiAssistant({ context }: { context?: string }) {
           )}
         </div>
 
-        {/* Робот — зацикленное видео (вперёд-назад одним файлом, без рывка на стыке).
-            Чёрный фон видео убираем через mix-blend-mode: lighten поверх СПЛОШНОЙ подложки
-            (isolate + robot-stage). lighten делает чёрные пиксели = цвету подложки, поэтому
-            фон исчезает одинаково во всех браузерах, включая Safari/Mac. */}
-        <div className="robot-stage anim-float-slow shrink-0 self-center">
-          <video
-            src="/videos/robot-loop.webm"
-            autoPlay
-            loop
-            muted
-            playsInline
+        {/* Робот — анимированный WebP с настоящим альфа-каналом (чёрный фон вырезан).
+            Прозрачность работает во всех браузерах, включая Safari/Mac, без подложки
+            и blend-режимов. Зациклен вперёд-назад, поэтому склейка не видна. */}
+        <div className="shrink-0 self-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/images/robot.webp"
+            alt="ИИ-робот помощник"
             width={230}
             height={230}
-            aria-label="ИИ-робот помощник"
-            className="h-[230px] w-[230px] object-cover mix-blend-lighten"
+            className="anim-float-slow h-[230px] w-[230px] object-contain drop-shadow-[0_0_45px_rgba(91,150,255,0.4)]"
           />
         </div>
       </div>
