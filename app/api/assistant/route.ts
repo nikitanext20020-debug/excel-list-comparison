@@ -37,23 +37,22 @@ export async function POST(req: Request) {
       : SYSTEM_PROMPT
 
   try {
-    const res = await fetch("https://api.openmodel.ai/v1/chat/completions", {
+    // OpenModel отдаёт deepseek-v4-flash по Anthropic-протоколу «messages»
+    const res = await fetch("https://api.openmodel.ai/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
+        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
         model: "deepseek-v4-flash",
-        messages: [
-          { role: "system", content: system },
-          ...messages.map((m) => ({
-            role: m.role === "assistant" ? "assistant" : "user",
-            content: String(m.content).slice(0, 4000),
-          })),
-        ],
-        max_tokens: 1024,
-        temperature: 0.3,
+        system,
+        messages: messages.map((m) => ({
+          role: m.role === "assistant" ? "assistant" : "user",
+          content: String(m.content).slice(0, 4000),
+        })),
+        max_tokens: 2048,
       }),
     })
 
@@ -64,8 +63,14 @@ export async function POST(req: Request) {
     }
 
     const data = await res.json()
-    const answer: string = data?.choices?.[0]?.message?.content ?? "Пустой ответ от модели."
-    return Response.json({ answer })
+    // Модель «думающая»: content содержит блоки thinking и text — берём только text
+    const blocks: { type: string; text?: string }[] = Array.isArray(data?.content) ? data.content : []
+    const answer = blocks
+      .filter((b) => b.type === "text" && b.text)
+      .map((b) => b.text)
+      .join("\n")
+      .trim()
+    return Response.json({ answer: answer || "Модель не дала ответа, попробуйте переформулировать вопрос." })
   } catch (e) {
     console.log("[v0] OpenModel fetch failed:", e instanceof Error ? e.message : e)
     return Response.json({ error: "Не удалось связаться с сервисом ИИ." }, { status: 502 })
