@@ -33,8 +33,10 @@ function Step({ num, title, children }: { num: string; title: string; children: 
           {num}
         </span>
       </div>
-      <div className="flex min-w-0 flex-col gap-3 border-border pb-10 md:border-l md:pl-6">
-        <h2 className="text-base font-semibold text-balance">{title}</h2>
+      <div className="flex min-w-0 flex-col gap-3 border-border pb-[35px] md:border-l md:pl-6">
+        <h2 className="text-base font-semibold text-balance" style={{ color: "var(--chart-1)" }}>
+          {title}
+        </h2>
         {children}
       </div>
     </section>
@@ -179,15 +181,34 @@ export default function Page() {
         <div className="mx-auto flex max-w-5xl flex-wrap items-baseline justify-between gap-2 px-4 py-4 xl:px-0">
           <h1 className="text-gradient-hero text-lg font-bold tracking-tight">
             Сверка списков{" "}
-            <span className="font-mono text-sm font-normal text-primary" style={{ WebkitTextFillColor: "var(--primary)" }}>
-              ФИО · телефон · дата рождения
+            <span
+              className="text-sm font-normal text-primary"
+              style={{ WebkitTextFillColor: "var(--primary)", fontFamily: "system-ui", marginLeft: "10px" }}
+            >
+              фио · телефон · дата рождения
             </span>
           </h1>
           <div className="flex flex-wrap items-center gap-3">
-            <p className="font-rubik text-sm text-muted-foreground">
-              разработано <span className="font-medium text-primary">Никитой Мищенко</span>
+            <p
+              className="font-rubik text-sm inline"
+              style={{
+                fontWeight: "300",
+                color: "#ffffff",
+                paddingRight: "70px",
+                borderBottom: "1px solid rgba(217, 221, 230, 0)",
+                lineHeight: "1.4em",
+                paddingBottom: "1px",
+              }}
+            >
+              разработано{" "}
+              <span className="text-primary" style={{ fontWeight: "400", textTransform: "capitalize" }}>
+                Никитой Мищенко
+              </span>
             </p>
-            <p className="glow-primary-soft rounded-full border border-primary/30 bg-primary/10 px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-primary">
+            <p
+              className="glow-primary-soft rounded-full border border-primary/30 bg-primary/10 px-3 py-1 font-mono text-[11px] uppercase tracking-wider"
+              style={{ color: "#5dffe1", marginRight: "-13px" }}
+            >
               локально · файлы не покидают браузер
             </p>
           </div>
@@ -444,6 +465,9 @@ export default function Page() {
           </p>
           <p className="font-rubik text-xs text-muted-foreground">
             разработано <span className="text-primary">Никитой Мищенко</span>
+          </p>
+          <p style={{ fontFamily: '"Inter", sans-serif', fontSize: "14px", color: "rgba(97, 218, 255, 0.27)" }}>
+            последнее обновление июль 2026
           </p>
         </div>
       </footer>

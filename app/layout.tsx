@@ -1,11 +1,12 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
-import { Manrope, DM_Sans, Rubik } from 'next/font/google'
+import { Manrope, DM_Sans, Rubik, Inter } from 'next/font/google'
 import './globals.css'
 
 const _manrope = Manrope({ subsets: ['latin', 'cyrillic'] })
 const _dmSans = DM_Sans({ subsets: ['latin'], weight: ['400', '500', '600', '700'] })
 const _rubik = Rubik({ subsets: ['latin', 'cyrillic'], weight: ['400', '500', '600'] })
+const _inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'Сверка списков — ФИО и телефоны',
@@ -33,7 +34,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   colorScheme: 'dark',
-  themeColor: '#060b16',
+  themeColor: '#0b1424',
 }
 
 export default function RootLayout({
