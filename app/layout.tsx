@@ -1,9 +1,9 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
-import { Golos_Text, IBM_Plex_Mono } from 'next/font/google'
+import { Manrope, IBM_Plex_Mono } from 'next/font/google'
 import './globals.css'
 
-const _golos = Golos_Text({ subsets: ['latin', 'cyrillic'] })
+const _manrope = Manrope({ subsets: ['latin', 'cyrillic'] })
 const _plexMono = IBM_Plex_Mono({ subsets: ['latin', 'cyrillic'], weight: ['400', '500', '600'] })
 
 export const metadata: Metadata = {
@@ -31,8 +31,8 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'light',
-  themeColor: '#f2f3ee',
+  colorScheme: 'dark',
+  themeColor: '#060b16',
 }
 
 export default function RootLayout({

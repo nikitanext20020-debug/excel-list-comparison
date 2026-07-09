@@ -175,12 +175,15 @@ export default function Page() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-border bg-card">
+      <header className="glass-card sticky top-0 z-10 border-b border-border/60">
         <div className="mx-auto flex max-w-5xl flex-wrap items-baseline justify-between gap-2 px-4 py-4 xl:px-0">
-          <h1 className="text-lg font-semibold tracking-tight">
-            Сверка списков <span className="font-mono text-sm font-normal text-primary">ФИО · телефон · дата рождения</span>
+          <h1 className="text-gradient-hero text-lg font-bold tracking-tight">
+            Сверка списков{" "}
+            <span className="font-mono text-sm font-normal text-primary" style={{ WebkitTextFillColor: "var(--primary)" }}>
+              ФИО · телефон · дата рождения
+            </span>
           </h1>
-          <p className="rounded-full border border-border bg-muted px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+          <p className="glow-primary-soft rounded-full border border-primary/30 bg-primary/10 px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-primary">
             локально · файлы не покидают браузер
           </p>
         </div>
@@ -219,8 +222,10 @@ export default function Page() {
                   setDownloadNote(null)
                   setError(null)
                 }}
-                className={`flex flex-col gap-1 rounded-lg border p-4 text-left transition-colors ${
-                  mode === m.id ? "border-primary bg-card ring-2 ring-primary/25" : "border-border bg-card hover:border-primary/50"
+                className={`flex flex-col gap-1 rounded-lg border p-4 text-left transition-all ${
+                  mode === m.id
+                    ? "glow-primary-soft border-primary bg-primary/10 ring-2 ring-primary/30"
+                    : "border-border bg-card hover:border-primary/50 hover:bg-primary/5"
                 }`}
               >
                 <span className="text-sm font-semibold">{m.title}</span>
@@ -329,7 +334,7 @@ export default function Page() {
               type="button"
               onClick={run}
               disabled={!ready}
-              className="rounded-md bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              className="btn-lift glow-primary rounded-lg bg-primary px-7 py-2.5 text-sm font-bold text-primary-foreground hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
             >
               {running ? "Обрабатываю…" : mode === "dupes" ? "Найти дубли" : "Запустить сверку"}
             </button>
@@ -378,7 +383,7 @@ export default function Page() {
                 <button
                   type="button"
                   onClick={downloadResult}
-                  className="rounded-md bg-foreground px-6 py-2.5 text-sm font-semibold text-background transition-opacity hover:opacity-90"
+                  className="btn-lift rounded-lg bg-foreground px-6 py-2.5 text-sm font-bold text-background shadow-[0_0_24px_rgba(230,237,247,0.18)] hover:opacity-90"
                 >
                   Скачать результат (.xlsx)
                 </button>
@@ -399,14 +404,14 @@ export default function Page() {
                   <button
                     type="button"
                     onClick={downloadClean}
-                    className="rounded-md bg-foreground px-6 py-2.5 text-sm font-semibold text-background transition-opacity hover:opacity-90"
+                    className="btn-lift rounded-lg bg-foreground px-6 py-2.5 text-sm font-bold text-background shadow-[0_0_24px_rgba(230,237,247,0.18)] hover:opacity-90"
                   >
                     Скачать файл без дублей
                   </button>
                   <button
                     type="button"
                     onClick={downloadDupesReport}
-                    className="rounded-md border border-input bg-card px-6 py-2.5 text-sm font-semibold transition-colors hover:border-foreground/40"
+                    className="btn-lift rounded-lg border border-primary/40 bg-primary/10 px-6 py-2.5 text-sm font-semibold text-primary hover:bg-primary/20"
                   >
                     Скачать отчёт по дублям
                   </button>
@@ -421,11 +426,14 @@ export default function Page() {
         </Step>
       </main>
 
-      <footer className="border-t border-border">
-        <div className="mx-auto max-w-5xl px-4 py-6 xl:px-0">
-          <p className="text-xs leading-relaxed text-muted-foreground">
+      <footer className="border-t border-border/60">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-6 xl:px-0">
+          <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
             Сверка учитывает ё/е, порядок слов, опечатки, смену фамилии по телефону и тёзок по дате рождения. Обработка идёт в
             отдельном потоке браузера — интерфейс не замирает даже на больших файлах.
+          </p>
+          <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+            Разработано <span className="text-primary">Никитой Мищенко</span>
           </p>
         </div>
       </footer>

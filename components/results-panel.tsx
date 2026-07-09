@@ -106,7 +106,7 @@ export function ResultsPanel({ results, dbCount, decisions, onDecide }: ResultsP
                       aria-pressed={d === "no"}
                       className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
                         d === "no"
-                          ? "border-destructive bg-destructive text-white"
+                          ? "border-destructive bg-destructive text-background"
                           : "border-input bg-card text-foreground hover:border-destructive/60"
                       }`}
                     >
