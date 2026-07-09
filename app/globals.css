@@ -6,7 +6,10 @@
 
 @theme inline {
   --font-sans: 'Manrope', 'Manrope Fallback', system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', 'IBM Plex Mono Fallback', monospace;
+  /* цифры и данные — DM Sans (кириллица падает в Manrope) */
+  --font-mono: 'DM Sans', 'DM Sans Fallback', 'Manrope', system-ui, sans-serif;
+  /* фирменная подпись */
+  --font-rubik: 'Rubik', 'Rubik Fallback', system-ui, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,39 +52,39 @@
 
 :root {
   color-scheme: dark;
-  /* «Ночная сверка»: глубокий сине-чернильный фон, лазурный акцент, янтарь для спорных */
-  --background: #060b16;
-  --foreground: #e6edf7;
-  --card: #0c1524;
-  --card-foreground: #e6edf7;
-  --popover: #101b2e;
-  --popover-foreground: #e6edf7;
-  --primary: #4f8dff;
+  /* «Ночная сверка»: сине-чернильный фон посветлее, лазурный акцент, янтарь для спорных */
+  --background: #0b1424;
+  --foreground: #eaf1fa;
+  --card: #121e33;
+  --card-foreground: #eaf1fa;
+  --popover: #16243c;
+  --popover-foreground: #eaf1fa;
+  --primary: #5b96ff;
   --primary-foreground: #050c1a;
-  --secondary: #15233a;
-  --secondary-foreground: #e6edf7;
-  --muted: #0f1a2c;
-  --muted-foreground: #8fa3bf;
+  --secondary: #1b2c48;
+  --secondary-foreground: #eaf1fa;
+  --muted: #16233a;
+  --muted-foreground: #9db1cd;
   --accent: #241c0b;
   --accent-foreground: #f2b950;
   --destructive: #ff6b5e;
-  --border: #1c2b47;
-  --input: #26395e;
-  --ring: #4f8dff;
-  --chart-1: #4f8dff;
+  --border: #27395c;
+  --input: #334871;
+  --ring: #5b96ff;
+  --chart-1: #5b96ff;
   --chart-2: #f2b950;
   --chart-3: #ff6b5e;
-  --chart-4: #8fa3bf;
-  --chart-5: #e6edf7;
+  --chart-4: #9db1cd;
+  --chart-5: #eaf1fa;
   --radius: 0.625rem;
-  --sidebar: #0c1524;
-  --sidebar-foreground: #e6edf7;
-  --sidebar-primary: #4f8dff;
+  --sidebar: #121e33;
+  --sidebar-foreground: #eaf1fa;
+  --sidebar-primary: #5b96ff;
   --sidebar-primary-foreground: #050c1a;
-  --sidebar-accent: #0f1a2c;
-  --sidebar-accent-foreground: #e6edf7;
-  --sidebar-border: #1c2b47;
-  --sidebar-ring: #4f8dff;
+  --sidebar-accent: #16233a;
+  --sidebar-accent-foreground: #eaf1fa;
+  --sidebar-border: #27395c;
+  --sidebar-ring: #5b96ff;
 }
 
 @layer base {
@@ -92,29 +95,34 @@
     @apply text-foreground;
     background-color: var(--background);
     background-image:
-      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(79, 141, 255, 0.18), transparent 60%),
-      radial-gradient(ellipse 60% 45% at 85% 108%, rgba(56, 189, 248, 0.1), transparent 65%),
-      radial-gradient(ellipse 50% 40% at 0% 65%, rgba(99, 102, 241, 0.08), transparent 60%),
-      linear-gradient(180deg, #081020 0%, #060b16 45%, #070e1d 100%);
+      radial-gradient(ellipse 85% 55% at 50% -10%, rgba(91, 150, 255, 0.32), transparent 62%),
+      radial-gradient(ellipse 65% 50% at 88% 105%, rgba(56, 189, 248, 0.2), transparent 65%),
+      radial-gradient(ellipse 55% 45% at -5% 60%, rgba(129, 140, 248, 0.18), transparent 62%),
+      radial-gradient(ellipse 40% 30% at 70% 40%, rgba(91, 150, 255, 0.08), transparent 70%),
+      linear-gradient(180deg, #0e1a30 0%, #0b1424 45%, #0d1729 100%);
     background-attachment: fixed;
   }
 }
 
 @layer utilities {
-  /* мягкое лазурное свечение для главных кнопок */
+  /* лазурное свечение для главных кнопок */
   .glow-primary {
     box-shadow:
-      0 0 18px rgba(79, 141, 255, 0.4),
-      0 0 55px rgba(79, 141, 255, 0.16);
+      0 0 22px rgba(91, 150, 255, 0.55),
+      0 0 70px rgba(91, 150, 255, 0.25);
   }
   .glow-primary-soft {
-    box-shadow: 0 0 30px rgba(79, 141, 255, 0.12);
+    box-shadow: 0 0 40px rgba(91, 150, 255, 0.22);
   }
   /* стеклянные карточки поверх градиентного фона */
   .glass-card {
-    background: rgba(12, 21, 36, 0.72);
+    background: rgba(18, 30, 51, 0.72);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
+  }
+  /* подпись автора */
+  .font-rubik {
+    font-family: var(--font-rubik);
   }
   /* текст с сине-белым градиентом, как в референсе */
   .text-gradient-hero {

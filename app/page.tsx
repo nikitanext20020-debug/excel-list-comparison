@@ -183,9 +183,14 @@ export default function Page() {
               ФИО · телефон · дата рождения
             </span>
           </h1>
-          <p className="glow-primary-soft rounded-full border border-primary/30 bg-primary/10 px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-primary">
-            локально · файлы не покидают браузер
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="font-rubik text-sm text-muted-foreground">
+              разработано <span className="font-medium text-primary">Никитой Мищенко</span>
+            </p>
+            <p className="glow-primary-soft rounded-full border border-primary/30 bg-primary/10 px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-primary">
+              локально · файлы не покидают браузер
+            </p>
+          </div>
         </div>
       </header>
 
@@ -245,11 +250,16 @@ export default function Page() {
                     role="radio"
                     aria-checked={strictness === s.id}
                     onClick={() => setStrictness(s.id)}
-                    className={`flex-1 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
-                      strictness === s.id ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground"
+                    className={`btn-lift flex-1 rounded px-3 py-1.5 text-xs font-medium ${
+                      strictness === s.id
+                        ? "glow-primary-soft bg-primary font-bold text-primary-foreground"
+                        : "text-muted-foreground hover:bg-primary/10 hover:text-foreground"
                     }`}
                   >
-                    {s.label} <span className="hidden font-normal text-muted-foreground sm:inline">— {s.desc}</span>
+                    {s.label}{" "}
+                    <span className={`hidden font-normal sm:inline ${strictness === s.id ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+                      — {s.desc}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -432,8 +442,8 @@ export default function Page() {
             Сверка учитывает ё/е, порядок слов, опечатки, смену фамилии по телефону и тёзок по дате рождения. Обработка идёт в
             отдельном потоке браузера — интерфейс не замирает даже на больших файлах.
           </p>
-          <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-            Разработано <span className="text-primary">Никитой Мищенко</span>
+          <p className="font-rubik text-xs text-muted-foreground">
+            разработано <span className="text-primary">Никитой Мищенко</span>
           </p>
         </div>
       </footer>

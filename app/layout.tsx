@@ -1,10 +1,11 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
-import { Manrope, IBM_Plex_Mono } from 'next/font/google'
+import { Manrope, DM_Sans, Rubik } from 'next/font/google'
 import './globals.css'
 
 const _manrope = Manrope({ subsets: ['latin', 'cyrillic'] })
-const _plexMono = IBM_Plex_Mono({ subsets: ['latin', 'cyrillic'], weight: ['400', '500', '600'] })
+const _dmSans = DM_Sans({ subsets: ['latin'], weight: ['400', '500', '600', '700'] })
+const _rubik = Rubik({ subsets: ['latin', 'cyrillic'], weight: ['400', '500', '600'] })
 
 export const metadata: Metadata = {
   title: 'Сверка списков — ФИО и телефоны',
