@@ -4,6 +4,7 @@ import { useRef, useState } from "react"
 import type { LoadedFile } from "@/lib/xlsx-io"
 import { colLetter, loadExcelFile, switchSheet } from "@/lib/xlsx-io"
 import type { ColumnConfig } from "@/workers/match.worker"
+import { ExcelIcon } from "@/components/excel-icon"
 
 interface FileCardProps {
   index: 1 | 2
@@ -145,9 +146,7 @@ export function FileCard({ index, title, subtitle, file, dimmed, onLoaded }: Fil
             drag ? "border-primary bg-primary/5" : "border-input hover:border-primary/60 hover:bg-muted"
           }`}
         >
-          <span className="font-mono text-2xl text-muted-foreground" aria-hidden="true">
-            {".xlsx"}
-          </span>
+          <ExcelIcon size={56} />
           <span className="text-sm font-medium">{loading ? "Читаю файл…" : "Перетащите файл или нажмите"}</span>
           <span className="text-xs text-muted-foreground">Excel или CSV, обрабатывается локально</span>
           {loadError && <span className="text-xs text-destructive">{loadError}</span>}

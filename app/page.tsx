@@ -182,7 +182,7 @@ export default function Page() {
           <h1 className="text-gradient-hero text-lg font-bold tracking-tight">
             Сверка списков{" "}
             <span
-              className="text-sm font-normal text-primary"
+              className="anim-typing text-sm font-normal text-primary"
               style={{ WebkitTextFillColor: "var(--primary)", fontFamily: "system-ui", marginLeft: "10px" }}
             >
               фио · телефон · дата рождения
@@ -201,12 +201,18 @@ export default function Page() {
               }}
             >
               разработано{" "}
-              <span className="text-primary" style={{ fontWeight: "400", textTransform: "capitalize" }}>
+              <a
+                href="https://t.me/pythonvoin"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline-offset-4 transition-colors hover:underline hover:brightness-125"
+                style={{ fontWeight: "400", textTransform: "capitalize" }}
+              >
                 Никитой Мищенко
-              </span>
+              </a>
             </p>
             <p
-              className="glow-primary-soft rounded-full border border-primary/30 bg-primary/10 px-3 py-1 font-mono text-[11px] uppercase tracking-wider"
+              className="anim-pulse-glow rounded-full border border-primary/30 bg-primary/10 px-3 py-1 font-mono text-[11px] uppercase tracking-wider"
               style={{ color: "#5dffe1", marginRight: "-13px" }}
             >
               локально · файлы не покидают браузер
@@ -464,9 +470,17 @@ export default function Page() {
             отдельном потоке браузера — интерфейс не замирает даже на больших файлах.
           </p>
           <p className="font-rubik text-xs text-muted-foreground">
-            разработано <span className="text-primary">Никитой Мищенко</span>
+            разработано{" "}
+            <a
+              href="https://t.me/pythonvoin"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline-offset-4 transition-colors hover:underline hover:brightness-125"
+            >
+              Никитой Мищенко
+            </a>
           </p>
-          <p style={{ fontFamily: '"Inter", sans-serif', fontSize: "14px", color: "rgba(97, 218, 255, 0.27)" }}>
+          <p className="anim-shimmer" style={{ fontFamily: '"Inter", sans-serif', fontSize: "14px", color: "rgba(97, 218, 255, 0.27)" }}>
             последнее обновление июль 2026
           </p>
         </div>
