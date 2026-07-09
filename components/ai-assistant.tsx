@@ -1,8 +1,64 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 
 type Msg = { role: "user" | "assistant"; content: string }
+
+/* компактный рендер markdown: **жирный**, списки, код — в стиле пузыря */
+function Markdown({ children }: { children: string }) {
+  return (
+    <div className="prose-chat">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          strong: ({ children }) => <strong className="font-bold text-foreground">{children}</strong>,
+          p: ({ children }) => <p className="my-1 first:mt-0 last:mb-0">{children}</p>,
+          ul: ({ children }) => <ul className="my-1 list-disc pl-4">{children}</ul>,
+          ol: ({ children }) => <ol className="my-1 list-decimal pl-4">{children}</ol>,
+          li: ({ children }) => <li className="my-0.5">{children}</li>,
+          code: ({ children }) => (
+            <code className="rounded bg-background/70 px-1 py-0.5 font-mono text-[12px]">{children}</code>
+          ),
+        }}
+      >
+        {children}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
+/* сообщение агента с анимацией набора: текст проявляется посимвольно, затем рендерится markdown */
+function AssistantBubble({ content, animate }: { content: string; animate: boolean }) {
+  const [shown, setShown] = useState(animate ? "" : content)
+
+  useEffect(() => {
+    if (!animate) {
+      setShown(content)
+      return
+    }
+    setShown("")
+    let i = 0
+    // шаг набора: несколько символов за тик, чтобы длинные ответы не тянулись слишком долго
+    const step = Math.max(1, Math.round(content.length / 240))
+    const id = setInterval(() => {
+      i += step
+      setShown(content.slice(0, i))
+      if (i >= content.length) clearInterval(id)
+    }, 16)
+    return () => clearInterval(id)
+  }, [content, animate])
+
+  const typing = animate && shown.length < content.length
+
+  return (
+    <div className="max-w-[85%] self-start rounded-lg border border-border bg-card px-3 py-2 text-sm leading-relaxed text-card-foreground">
+      <Markdown>{shown}</Markdown>
+      {typing && <span className="typing-caret" aria-hidden="true" />}
+    </div>
+  )
+}
 
 export function AiAssistant({ context }: { context?: string }) {
   const [open, setOpen] = useState(false)
@@ -10,6 +66,7 @@ export function AiAssistant({ context }: { context?: string }) {
   const [input, setInput] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [animateIdx, setAnimateIdx] = useState<number>(-1)
   const listRef = useRef<HTMLDivElement>(null)
 
   async function send() {
@@ -30,7 +87,10 @@ export function AiAssistant({ context }: { context?: string }) {
       if (!res.ok) {
         setError(data.error || "Ошибка запроса.")
       } else {
-        setMessages((m) => [...m, { role: "assistant", content: data.answer }])
+        setMessages((m) => {
+          setAnimateIdx(m.length) // индекс нового ответа агента (добавляется в конец массива m)
+          return [...m, { role: "assistant", content: data.answer }]
+        })
       }
     } catch {
       setError("Нет соединения с сервером.")
@@ -75,19 +135,25 @@ export function AiAssistant({ context }: { context?: string }) {
                   </p>
                 )}
                 <div className="flex flex-col gap-2">
-                  {messages.map((m, i) => (
-                    <div
-                      key={i}
-                      className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm leading-relaxed ${
-                        m.role === "user"
-                          ? "self-end bg-primary text-primary-foreground"
-                          : "self-start border border-border bg-card text-card-foreground"
-                      }`}
-                    >
-                      {m.content}
+                  {messages.map((m, i) =>
+                    m.role === "user" ? (
+                      <div
+                        key={i}
+                        className="max-w-[85%] self-end whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm leading-relaxed text-primary-foreground"
+                      >
+                        {m.content}
+                      </div>
+                    ) : (
+                      <AssistantBubble key={i} content={m.content} animate={i === animateIdx} />
+                    ),
+                  )}
+                  {busy && (
+                    <div className="flex items-center gap-1 self-start px-1 py-1" aria-label="агент печатает">
+                      <span className="dot-typing" />
+                      <span className="dot-typing" style={{ animationDelay: "0.15s" }} />
+                      <span className="dot-typing" style={{ animationDelay: "0.3s" }} />
                     </div>
-                  ))}
-                  {busy && <div className="self-start text-xs text-muted-foreground">агент печатает…</div>}
+                  )}
                 </div>
               </div>
               {error && <p className="text-xs text-destructive">{error}</p>}
@@ -116,9 +182,11 @@ export function AiAssistant({ context }: { context?: string }) {
           )}
         </div>
 
-        {/* Робот — зацикленное видео (вперёд-назад одним файлом, без рывка на стыке);
-            mix-blend-screen убирает чёрный фон видео на любой платформе, включая Safari/Mac */}
-        <div className="shrink-0 self-center">
+        {/* Робот — зацикленное видео (вперёд-назад одним файлом, без рывка на стыке).
+            Чёрный фон видео убираем через mix-blend-mode: lighten поверх СПЛОШНОЙ подложки
+            (isolate + robot-stage). lighten делает чёрные пиксели = цвету подложки, поэтому
+            фон исчезает одинаково во всех браузерах, включая Safari/Mac. */}
+        <div className="robot-stage anim-float-slow shrink-0 self-center">
           <video
             src="/videos/robot-loop.webm"
             autoPlay
@@ -128,7 +196,7 @@ export function AiAssistant({ context }: { context?: string }) {
             width={230}
             height={230}
             aria-label="ИИ-робот помощник"
-            className="anim-float-slow h-[230px] w-[230px] object-cover mix-blend-screen"
+            className="h-[230px] w-[230px] object-cover mix-blend-lighten"
           />
         </div>
       </div>
