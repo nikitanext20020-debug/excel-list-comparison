@@ -49,9 +49,8 @@ export function AiAssistant({ context }: { context?: string }) {
             ИИ-помощник по сверке
           </h2>
           <p className="text-sm leading-relaxed text-muted-foreground">
-            Дополнительная проверка результата: агент объяснит, почему строка попала в «спорные», сравнит два ФИО с
-            учётом опечаток и подскажет настройки. Файлы целиком никуда не отправляются — только ваш вопрос и краткая
-            сводка сверки.
+            Помощник видит имена из загруженных файлов и результаты сверки: объяснит, почему строка попала в «спорные»,
+            сравнит ФИО с учётом опечаток, подскажет настройки — и ответит на любой другой вопрос.
           </p>
           {!open && (
             <button
@@ -117,18 +116,19 @@ export function AiAssistant({ context }: { context?: string }) {
           )}
         </div>
 
-        {/* Робот — анимированное видео */}
+        {/* Робот — зацикленное видео (вперёд-назад одним файлом, без рывка на стыке);
+            mix-blend-screen убирает чёрный фон видео на любой платформе, включая Safari/Mac */}
         <div className="shrink-0 self-center">
           <video
-            src="/videos/robot.webm"
+            src="/videos/robot-loop.webm"
             autoPlay
             loop
             muted
             playsInline
-            width={210}
-            height={210}
+            width={230}
+            height={230}
             aria-label="ИИ-робот помощник"
-            className="anim-float-slow h-[210px] w-[210px] rounded-2xl object-cover drop-shadow-[0_0_40px_rgba(91,150,255,0.45)]"
+            className="anim-float-slow h-[230px] w-[230px] object-cover mix-blend-screen"
           />
         </div>
       </div>

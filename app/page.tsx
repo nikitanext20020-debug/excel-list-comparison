@@ -240,14 +240,18 @@ export default function Page() {
       </header>
 
       <main className="relative mx-auto max-w-5xl px-4 pt-10 pb-10 xl:px-0">
-        {/* декоративная 3D-иконка Excel слева от шагов (на широких экранах) */}
-        <div className="pointer-events-none absolute top-16 -left-64 hidden select-none 2xl:block" aria-hidden="true">
+        {/* декоративная 3D-иконка Excel слева от шагов: крупнее и ближе к контенту,
+            видна уже с xl-экранов, чтобы не пропадала при приближении */}
+        <div
+          className="pointer-events-none absolute top-10 hidden select-none xl:-left-44 xl:block 2xl:-left-60"
+          aria-hidden="true"
+        >
           <Image
             src="/images/excel-3d.webp"
             alt=""
-            width={210}
-            height={210}
-            className="anim-float-slow-alt drop-shadow-[0_0_45px_rgba(34,197,94,0.35)]"
+            width={280}
+            height={280}
+            className="anim-float-slow-alt w-[170px] drop-shadow-[0_0_55px_rgba(34,197,94,0.4)] xl:w-[220px] 2xl:w-[280px]"
           />
         </div>
         <Step num="01" title="Выберите файлы">
@@ -500,19 +504,45 @@ export default function Page() {
       </main>
 
       <AiAssistant
-        context={
-          compareRes
-            ? (() => {
-                const count = (s: string) => compareRes.results.filter((r) => r.res.status === s).length
-                return (
-                  `Режим: ${mode}. Строгость: ${strictness}. Всего строк: ${compareRes.results.length}. ` +
-                  `Найдено точно: ${count("exact")}, с опечаткой: ${count("typo")}, смена фамилии: ${count("namechange")}, ` +
-                  `по телефону: ${count("phone")}, спорных: ${count("disputed")}, не найдено: ${count("notfound")}. ` +
-                  `База: ${compareRes.dbCount} строк.`
-                )
-              })()
-            : undefined
-        }
+        context={(() => {
+          const fioOf = (row: string[], cfg: ColumnConfig) => {
+            if (cfg.fioMode === "single") return cfg.fio >= 0 ? String(row[cfg.fio] ?? "").trim() : ""
+            return [cfg.fam, cfg.im, cfg.ot]
+              .filter((c) => c >= 0)
+              .map((c) => String(row[c] ?? "").trim())
+              .filter((p) => p && p.toLowerCase() !== "nan")
+              .join(" ")
+          }
+          const namesOf = (f: typeof fileA, limit: number) => {
+            if (!f) return null
+            const names = f.rows
+              .slice(f.cfg.start)
+              .map((r) => fioOf(r, f.cfg))
+              .filter(Boolean)
+            const shown = names.slice(0, limit)
+            return `${names.length} имён${names.length > limit ? ` (первые ${limit})` : ""}: ${shown.join("; ")}`
+          }
+          const parts: string[] = []
+          const n1 = namesOf(fileA, 400)
+          const n2 = namesOf(fileB, 400)
+          if (n1) parts.push(`Файл 1 «${fileA!.name}» — ${n1}`)
+          if (n2) parts.push(`Файл 2 (база) «${fileB!.name}» — ${n2}`)
+          if (compareRes) {
+            const count = (s: string) => compareRes.results.filter((r) => r.res.status === s).length
+            parts.push(
+              `Результат сверки (режим: ${mode}, строгость: ${strictness}): всего ${compareRes.results.length} строк. ` +
+                `Найдено точно: ${count("exact")}, с опечаткой: ${count("typo")}, смена фамилии: ${count("namechange")}, ` +
+                `по телефону: ${count("phone")}, спорных: ${count("disputed")}, не найдено: ${count("notfound")}. База: ${compareRes.dbCount} строк.`,
+            )
+            const detail = compareRes.results
+              .filter((r) => r.res.status === "disputed" || r.res.status === "notfound")
+              .slice(0, 120)
+              .map((r) => `строка ${r.excelRow}: ${r.fio} — ${r.res.status === "disputed" ? `спорный (${r.res.reason ?? "?"})` : "не найден"}`)
+            if (detail.length) parts.push(`Спорные и не найденные:\n${detail.join("\n")}`)
+          }
+          if (dupes) parts.push(`Поиск дублей: групп ${dupes.groups.length}, всего повторов ${dupes.total}.`)
+          return parts.length ? parts.join("\n\n") : undefined
+        })()}
       />
 
       <footer className="border-t border-border/60">
