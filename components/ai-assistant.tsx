@@ -1,7 +1,6 @@
 "use client"
 
 import { useRef, useState } from "react"
-import Image from "next/image"
 
 type Msg = { role: "user" | "assistant"; content: string }
 
@@ -118,14 +117,18 @@ export function AiAssistant({ context }: { context?: string }) {
           )}
         </div>
 
-        {/* Робот */}
+        {/* Робот — анимированное видео */}
         <div className="shrink-0 self-center">
-          <Image
-            src="/images/robot.webp"
-            alt="ИИ-робот помощник"
-            width={170}
-            height={170}
-            className="anim-float-slow drop-shadow-[0_0_40px_rgba(91,150,255,0.45)]"
+          <video
+            src="/videos/robot.webm"
+            autoPlay
+            loop
+            muted
+            playsInline
+            width={210}
+            height={210}
+            aria-label="ИИ-робот помощник"
+            className="anim-float-slow h-[210px] w-[210px] rounded-2xl object-cover drop-shadow-[0_0_40px_rgba(91,150,255,0.45)]"
           />
         </div>
       </div>
