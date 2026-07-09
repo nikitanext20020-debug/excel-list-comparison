@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { FileCard } from "@/components/file-card"
 import { ResultsPanel, type Decision } from "@/components/results-panel"
 import { DupesPanel } from "@/components/dupes-panel"
+import Image from "next/image"
 import { BlurInText } from "@/components/blur-in-text"
 import { AiAssistant } from "@/components/ai-assistant"
 import type { LoadedFile } from "@/lib/xlsx-io"
@@ -238,7 +239,17 @@ export default function Page() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 pt-10 pb-10 xl:px-0">
+      <main className="relative mx-auto max-w-5xl px-4 pt-10 pb-10 xl:px-0">
+        {/* декоративная 3D-иконка Excel слева от шагов (на широких экранах) */}
+        <div className="pointer-events-none absolute top-16 -left-64 hidden select-none 2xl:block" aria-hidden="true">
+          <Image
+            src="/images/excel-3d.webp"
+            alt=""
+            width={210}
+            height={210}
+            className="anim-float-slow-alt drop-shadow-[0_0_45px_rgba(34,197,94,0.35)]"
+          />
+        </div>
         <Step num="01" title="Выберите файлы">
           <div className="grid gap-4 lg:grid-cols-2">
             <FileCard index={1} title="Что сверяем" subtitle="файл, который проверяем" file={fileA} onLoaded={setFileA} />

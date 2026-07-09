@@ -44,17 +44,6 @@ export function AiAssistant({ context }: { context?: string }) {
   return (
     <section aria-label="ИИ-помощник" className="mx-auto max-w-5xl px-4 pb-14 xl:px-0">
       <div className="glass-card glow-primary-soft flex flex-col gap-6 rounded-2xl border border-primary/25 p-6 md:flex-row md:items-center md:p-8">
-        {/* 3D Excel */}
-        <div className="hidden shrink-0 md:block">
-          <Image
-            src="/images/excel-3d.webp"
-            alt=""
-            width={150}
-            height={150}
-            className="anim-float-slow-alt drop-shadow-[0_0_35px_rgba(34,197,94,0.35)]"
-          />
-        </div>
-
         {/* Текст и кнопка */}
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           <h2 className="text-lg font-bold" style={{ color: "var(--chart-1)" }}>
