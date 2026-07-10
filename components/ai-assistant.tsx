@@ -182,17 +182,18 @@ export function AiAssistant({ context }: { context?: string }) {
           )}
         </div>
 
-        {/* Робот — анимированный WebP с настоящим альфа-каналом (чёрный фон вырезан).
-            Прозрачность работает во всех браузерах, включая Safari/Mac, без подложки
-            и blend-режимов. Зациклен вперёд-назад, поэтому склейка не видна. */}
-        <div className="shrink-0 self-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/images/robot.webp"
-            alt="ИИ-робот помощник"
-            width={230}
-            height={230}
-            className="anim-float-slow h-[230px] w-[230px] object-contain drop-shadow-[0_0_45px_rgba(91,150,255,0.4)]"
+        {/* Робот — зацикленное видео */}
+        <div className="robot-stage anim-float-slow shrink-0 self-center">
+          <video
+            src="/videos/robot-loop.webm"
+            autoPlay
+            loop
+            muted
+            playsInline
+            width={240}
+            height={240}
+            aria-label="ИИ-робот помощник"
+            className="h-[240px] w-[240px] object-contain"
           />
         </div>
       </div>
