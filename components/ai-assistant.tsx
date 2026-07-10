@@ -60,6 +60,67 @@ function AssistantBubble({ content, animate }: { content: string; animate: boole
   )
 }
 
+/* Safari (macOS) и все браузеры на iOS/iPadOS не декодируют альфа-канал
+   VP9 в webm — фон видео там становится чёрным квадратом. Для них показываем
+   статичную картинку робота с настоящей прозрачностью. */
+function isAppleWebKit(): boolean {
+  const ua = navigator.userAgent
+  const isIOS =
+    /iPad|iPhone|iPod/.test(ua) ||
+    // iPadOS в десктопном режиме притворяется макбуком, но у него есть тач
+    (ua.includes("Macintosh") && navigator.maxTouchPoints > 1)
+  const isSafariMac = ua.includes("Safari") && !/Chrome|Chromium|Edg|OPR|Android/.test(ua)
+  return isIOS || isSafariMac
+}
+
+/* робот: в самом видеофайле уже склеены прямой и обратный проходы
+   (пинг-понг), поэтому обычный нативный loop даёт идеально плавный
+   бесконечный цикл. На Safari/iOS вместо видео — прозрачный webp. */
+function RobotVideo() {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  // до монтирования показываем статичную картинку (она работает везде),
+  // после — включаем видео только там, где поддерживается альфа-канал
+  const [useVideo, setUseVideo] = useState(false)
+
+  useEffect(() => {
+    if (!isAppleWebKit()) setUseVideo(true)
+  }, [])
+
+  useEffect(() => {
+    if (!useVideo) return
+    // страховка: если браузер заблокировал autoplay — пробуем запустить вручную
+    const v = videoRef.current
+    if (v?.paused) v.play().catch(() => {})
+  }, [useVideo])
+
+  if (!useVideo) {
+    return (
+      <img
+        src="/images/robot-static.webp"
+        width={240}
+        height={240}
+        alt="ИИ-робот помощник"
+        className="h-[240px] w-auto object-contain drop-shadow-[0_0_28px_rgba(91,150,255,0.35)]"
+      />
+    )
+  }
+
+  return (
+    <video
+      ref={videoRef}
+      src="/videos/robot-pingpong.webm"
+      autoPlay
+      loop
+      muted
+      playsInline
+      width={240}
+      height={240}
+      aria-label="ИИ-робот помощник"
+      className="h-[240px] w-[240px] object-contain"
+    />
+  )
+}
+
 export function AiAssistant({ context }: { context?: string }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Msg[]>([])
@@ -182,19 +243,9 @@ export function AiAssistant({ context }: { context?: string }) {
           )}
         </div>
 
-        {/* Робот — зацикленное видео */}
+        {/* Робот — бесконечный пинг-понг: вперёд, затем плавно назад */}
         <div className="robot-stage anim-float-slow shrink-0 self-center">
-          <video
-            src="/videos/robot-loop.webm"
-            autoPlay
-            loop
-            muted
-            playsInline
-            width={240}
-            height={240}
-            aria-label="ИИ-робот помощник"
-            className="h-[240px] w-[240px] object-contain"
-          />
+          <RobotVideo />
         </div>
       </div>
     </section>
