@@ -35,6 +35,11 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   colorScheme: 'dark',
   themeColor: '#0b1424',
+  // фикс для телефонов: сайт не масштабируется случайно (пинч/двойной тап)
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 }
 
 export default function RootLayout({

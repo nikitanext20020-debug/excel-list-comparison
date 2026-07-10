@@ -270,20 +270,26 @@ export default function Page() {
         </div>
         <Step num="01" title="Выберите файлы">
           <div className="relative grid gap-4 lg:grid-cols-2">
+            {/* на мобильных кнопка стоит между карточками (order-2),
+                на десктопе — по центру над карточками (absolute) */}
             <SwapFilesButton
               onClick={swapFiles}
               disabled={running || (!fileA && !fileB)}
-              className="absolute -top-9 left-1/2 z-10 -translate-x-1/2"
+              className="order-2 justify-self-center lg:absolute lg:-top-9 lg:left-1/2 lg:z-10 lg:order-none lg:-translate-x-1/2"
             />
-            <FileCard index={1} title="Что сверяем" subtitle="файл, который проверяем" file={fileA} onLoaded={setFileA} />
-            <FileCard
-              index={2}
-              title="База для сверки"
-              subtitle="файл, в котором ищем"
-              file={fileB}
-              dimmed={mode === "dupes"}
-              onLoaded={setFileB}
-            />
+            <div className="order-1 lg:order-none">
+              <FileCard index={1} title="Что сверяем" subtitle="файл, который проверяем" file={fileA} onLoaded={setFileA} />
+            </div>
+            <div className="order-3 lg:order-none">
+              <FileCard
+                index={2}
+                title="База для сверки"
+                subtitle="файл, в котором ищем"
+                file={fileB}
+                dimmed={mode === "dupes"}
+                onLoaded={setFileB}
+              />
+            </div>
           </div>
           {mode === "dupes" && <p className="text-xs text-muted-foreground">Для поиска дублей нужен только файл 1.</p>}
         </Step>
