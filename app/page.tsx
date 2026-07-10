@@ -7,6 +7,7 @@ import { DupesPanel } from "@/components/dupes-panel"
 import Image from "next/image"
 import { BlurInText } from "@/components/blur-in-text"
 import { AiAssistant } from "@/components/ai-assistant"
+import { SwapFilesButton } from "@/components/swap-files-button"
 import type { LoadedFile } from "@/lib/xlsx-io"
 import { buildColored, buildExport, buildDupesFile, buildCleanFile, downloadBlob } from "@/lib/xlsx-io"
 import type { Strictness } from "@/lib/matching"
@@ -97,6 +98,18 @@ export default function Page() {
 
   const needB = mode !== "dupes"
   const ready = !!fileA && (!needB || !!fileB) && !running
+
+  /* меняем файлы местами (вместе с их настройками столбцов) и сбрасываем результаты */
+  function swapFiles() {
+    setFileA(fileB)
+    setFileB(fileA)
+    setCompareRes(null)
+    setDupes(null)
+    setDecisions({})
+    setProgress(null)
+    setDownloadNote(null)
+    setError(null)
+  }
 
   function run() {
     setError(null)
@@ -251,11 +264,17 @@ export default function Page() {
             alt=""
             width={280}
             height={280}
+            priority
             className="anim-float-slow-alt w-[170px] drop-shadow-[0_0_55px_rgba(34,197,94,0.4)] xl:w-[220px] 2xl:w-[280px]"
           />
         </div>
         <Step num="01" title="Выберите файлы">
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="relative grid gap-4 lg:grid-cols-2">
+            <SwapFilesButton
+              onClick={swapFiles}
+              disabled={running || (!fileA && !fileB)}
+              className="absolute -top-9 left-1/2 z-10 -translate-x-1/2"
+            />
             <FileCard index={1} title="Что сверяем" subtitle="файл, который проверяем" file={fileA} onLoaded={setFileA} />
             <FileCard
               index={2}
