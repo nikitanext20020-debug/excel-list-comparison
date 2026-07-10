@@ -182,15 +182,18 @@ export function AiAssistant({ context }: { context?: string }) {
           )}
         </div>
 
-        {/* Робот — статичный webp с настоящим альфа-каналом (без фона),
-            анимация парения через CSS, чтобы не нагружать FPS */}
+        {/* Робот — зацикленное видео */}
         <div className="robot-stage anim-float-slow shrink-0 self-center">
-          <img
-            src="/images/robot-hq.webp"
+          <video
+            src="/videos/robot-loop.webm"
+            autoPlay
+            loop
+            muted
+            playsInline
             width={240}
-            height={229}
-            alt="ИИ-робот помощник"
-            className="h-auto w-[240px] object-contain drop-shadow-[0_0_28px_rgba(91,150,255,0.35)]"
+            height={240}
+            aria-label="ИИ-робот помощник"
+            className="h-[240px] w-[240px] object-contain"
           />
         </div>
       </div>
