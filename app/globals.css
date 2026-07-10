@@ -151,6 +151,25 @@
     visibility 0s;
 }
 
+/* подложка робота: сплошной цвет + isolate, чтобы mix-blend-lighten
+   на видео убирал чёрный фон одинаково во всех браузерах (в т.ч. Safari) */
+.robot-stage {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 230px;
+  height: 230px;
+  border-radius: 1.25rem;
+  /* цвет близок к стеклянной карточке, поэтому тёмные пиксели видео исчезают */
+  background: #16233b;
+  box-shadow:
+    0 0 0 1px rgba(91, 150, 255, 0.15),
+    0 0 45px rgba(91, 150, 255, 0.25),
+    inset 0 0 40px rgba(91, 150, 255, 0.08);
+}
+
 /* курсор набора текста в ответе агента */
 .typing-caret {
   display: inline-block;
@@ -235,7 +254,7 @@
   }
 }
 
-/* ��едленное парение 3D-картинок (Excel и робот) */
+/* медленное парение 3D-картинок (Excel и робот) */
 .anim-float-slow {
   animation: float-slow 5.5s ease-in-out infinite;
 }
