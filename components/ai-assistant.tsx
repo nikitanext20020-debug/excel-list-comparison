@@ -60,6 +60,34 @@ function AssistantBubble({ content, animate }: { content: string; animate: boole
   )
 }
 
+/* робот: в самом видеофайле уже склеены прямой и обратный проходы
+   (пинг-понг), поэтому обычный нативный loop даёт идеально плавный
+   бесконечный цикл без JS-перемоток и рывков */
+function RobotVideo() {
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    // страховка: если браузер заблокировал autoplay — пробуем запустить вручную
+    const v = videoRef.current
+    if (v?.paused) v.play().catch(() => {})
+  }, [])
+
+  return (
+    <video
+      ref={videoRef}
+      src="/videos/robot-pingpong.webm"
+      autoPlay
+      loop
+      muted
+      playsInline
+      width={240}
+      height={240}
+      aria-label="ИИ-робот помощник"
+      className="h-[240px] w-[240px] object-contain"
+    />
+  )
+}
+
 export function AiAssistant({ context }: { context?: string }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Msg[]>([])
@@ -182,19 +210,9 @@ export function AiAssistant({ context }: { context?: string }) {
           )}
         </div>
 
-        {/* Робот — зацикленное видео */}
+        {/* Робот — бесконечный пинг-понг: вперёд, затем плавно назад */}
         <div className="robot-stage anim-float-slow shrink-0 self-center">
-          <video
-            src="/videos/robot-loop.webm"
-            autoPlay
-            loop
-            muted
-            playsInline
-            width={240}
-            height={240}
-            aria-label="ИИ-робот помощник"
-            className="h-[240px] w-[240px] object-contain"
-          />
+          <RobotVideo />
         </div>
       </div>
     </section>
