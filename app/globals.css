@@ -170,6 +170,46 @@
   pointer-events: none;
 }
 
+/* кнопка «поменять местами»: встречные стрелки анимируются при наведении */
+.swap-btn .swap-arrow-top,
+.swap-btn .swap-arrow-bottom {
+  transform: translateX(0);
+}
+.swap-btn:hover:not(:disabled) .swap-arrow-top {
+  animation: swap-move-right 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.swap-btn:hover:not(:disabled) .swap-arrow-bottom {
+  animation: swap-move-left 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+@keyframes swap-move-right {
+  0%,
+  100% {
+    transform: translateX(-7px);
+    opacity: 0.72;
+  }
+  50% {
+    transform: translateX(7px);
+    opacity: 1;
+  }
+}
+@keyframes swap-move-left {
+  0%,
+  100% {
+    transform: translateX(7px);
+    opacity: 1;
+  }
+  50% {
+    transform: translateX(-7px);
+    opacity: 0.72;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .swap-btn .swap-arrow-top,
+  .swap-btn .swap-arrow-bottom {
+    animation: none !important;
+  }
+}
+
 /* курсор набора текста в ответе агента */
 .typing-caret {
   display: inline-block;
