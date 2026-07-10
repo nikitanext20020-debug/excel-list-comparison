@@ -60,54 +60,24 @@ function AssistantBubble({ content, animate }: { content: string; animate: boole
   )
 }
 
-/* робот: пинг-понг воспроизведение — видео играет вперёд, а по окончании
-   плавно отматывается назад (браузеры не умеют играть видео в обратную сторону,
-   поэтому обратный ход делаем вручную через requestAnimationFrame) */
+/* робот: в самом видеофайле уже склеены прямой и обратный проходы
+   (пинг-понг), поэтому обычный нативный loop даёт идеально плавный
+   бесконечный цикл без JS-перемоток и рывков */
 function RobotVideo() {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const rafRef = useRef<number>(0)
 
   useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
-
-    let lastTs = 0
-
-    function reverseStep(ts: number) {
-      const v = videoRef.current
-      if (!v) return
-      const dt = lastTs ? (ts - lastTs) / 1000 : 0
-      lastTs = ts
-      const next = v.currentTime - dt
-      if (next <= 0.04) {
-        // дошли до начала — снова играем вперёд
-        v.currentTime = 0
-        v.play().catch(() => {})
-        return
-      }
-      v.currentTime = next
-      rafRef.current = requestAnimationFrame(reverseStep)
-    }
-
-    function onEnded() {
-      lastTs = 0
-      rafRef.current = requestAnimationFrame(reverseStep)
-    }
-
-    video.addEventListener("ended", onEnded)
     // страховка: если браузер заблокировал autoplay — пробуем запустить вручную
-    if (video.paused) video.play().catch(() => {})
-    return () => {
-      video.removeEventListener("ended", onEnded)
-      cancelAnimationFrame(rafRef.current)
-    }
+    const v = videoRef.current
+    if (v?.paused) v.play().catch(() => {})
   }, [])
 
   return (
     <video
       ref={videoRef}
-      src="/videos/robot-loop.webm"
+      src="/videos/robot-pingpong.webm"
       autoPlay
+      loop
       muted
       playsInline
       width={240}
