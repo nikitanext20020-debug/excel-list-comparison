@@ -60,6 +60,64 @@ function AssistantBubble({ content, animate }: { content: string; animate: boole
   )
 }
 
+/* робот: пинг-понг воспроизведение — видео играет вперёд, а по окончании
+   плавно отматывается назад (браузеры не умеют играть видео в обратную сторону,
+   поэтому обратный ход делаем вручную через requestAnimationFrame) */
+function RobotVideo() {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const rafRef = useRef<number>(0)
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    let lastTs = 0
+
+    function reverseStep(ts: number) {
+      const v = videoRef.current
+      if (!v) return
+      const dt = lastTs ? (ts - lastTs) / 1000 : 0
+      lastTs = ts
+      const next = v.currentTime - dt
+      if (next <= 0.04) {
+        // дошли до начала — снова играем вперёд
+        v.currentTime = 0
+        v.play().catch(() => {})
+        return
+      }
+      v.currentTime = next
+      rafRef.current = requestAnimationFrame(reverseStep)
+    }
+
+    function onEnded() {
+      lastTs = 0
+      rafRef.current = requestAnimationFrame(reverseStep)
+    }
+
+    video.addEventListener("ended", onEnded)
+    // страховка: если браузер заблокировал autoplay — пробуем запустить вручную
+    if (video.paused) video.play().catch(() => {})
+    return () => {
+      video.removeEventListener("ended", onEnded)
+      cancelAnimationFrame(rafRef.current)
+    }
+  }, [])
+
+  return (
+    <video
+      ref={videoRef}
+      src="/videos/robot-loop.webm"
+      autoPlay
+      muted
+      playsInline
+      width={240}
+      height={240}
+      aria-label="ИИ-робот помощник"
+      className="h-[240px] w-[240px] object-contain"
+    />
+  )
+}
+
 export function AiAssistant({ context }: { context?: string }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Msg[]>([])
@@ -182,19 +240,9 @@ export function AiAssistant({ context }: { context?: string }) {
           )}
         </div>
 
-        {/* Робот — зацикленное видео */}
+        {/* Робот — бесконечный пинг-понг: вперёд, затем плавно назад */}
         <div className="robot-stage anim-float-slow shrink-0 self-center">
-          <video
-            src="/videos/robot-loop.webm"
-            autoPlay
-            loop
-            muted
-            playsInline
-            width={240}
-            height={240}
-            aria-label="ИИ-робот помощник"
-            className="h-[240px] w-[240px] object-contain"
-          />
+          <RobotVideo />
         </div>
       </div>
     </section>
