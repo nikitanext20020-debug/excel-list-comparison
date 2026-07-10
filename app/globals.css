@@ -180,16 +180,17 @@
   pointer-events: none;
 }
 
-/* кнопка «поменять местами»: встречные стрелки анимируются при наведении */
-.swap-btn .swap-arrow-top,
-.swap-btn .swap-arrow-bottom {
-  transform: translateX(0);
-}
-.swap-btn:hover:not(:disabled) .swap-arrow-top {
+/* кнопка «поменять местами»: встречные стрелки анимируются постоянно
+   (как в исходном SVG), при наведении ускоряются */
+.swap-btn .swap-arrow-top {
   animation: swap-move-right 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
-.swap-btn:hover:not(:disabled) .swap-arrow-bottom {
+.swap-btn .swap-arrow-bottom {
   animation: swap-move-left 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.swap-btn:hover:not(:disabled) .swap-arrow-top,
+.swap-btn:hover:not(:disabled) .swap-arrow-bottom {
+  animation-duration: 0.9s;
 }
 @keyframes swap-move-right {
   0%,
