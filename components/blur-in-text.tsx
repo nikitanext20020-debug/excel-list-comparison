@@ -14,7 +14,8 @@ export function BlurInText({
   charDelay?: number
 }) {
   return (
-    <span className={className} aria-label={text}>
+    <span className={className}>
+      <span className="sr-only">{text}</span>
       {Array.from(text).map((ch, i) => (
         <span
           key={i}

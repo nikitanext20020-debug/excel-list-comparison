@@ -119,6 +119,7 @@ export function FileCard({ index, title, subtitle, file, dimmed, onLoaded }: Fil
         ref={inputRef}
         type="file"
         accept=".xlsx,.xls,.xlsm,.csv"
+        aria-label={`Файл ${index}: ${title} — выбрать файл Excel или CSV`}
         className="sr-only"
         onChange={(e) => {
           const f = e.target.files?.[0]
