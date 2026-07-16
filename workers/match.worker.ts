@@ -9,11 +9,13 @@ import {
   normalizeFuzzy,
   canonicalKey,
   normalizePhone,
+  normalizeDob,
   THRESHOLD_PRESETS,
   type MatchResult,
   type MatchStatus,
   type Strictness,
 } from "@/lib/matching"
+import { DUP_NAMESAKE_TYPE } from "@/lib/dupes"
 
 export interface ColumnConfig {
   start: number
@@ -48,7 +50,7 @@ export type WorkerRequest =
 export type WorkerResponse =
   | { kind: "progress"; pct: number; text: string }
   | { kind: "compare-done"; results: RowResult[]; counts: Record<MatchStatus, number>; dbCount: number }
-  | { kind: "dupes-done"; groups: DupMember[][]; total: number }
+  | { kind: "dupes-done"; groups: DupMember[][]; disputed?: DupMember[][]; phoneGroups: DupMember[][]; total: number }
   | { kind: "error"; message: string }
 
 function getFio(row: string[], cfg: ColumnConfig): string {
@@ -107,26 +109,60 @@ function runDupes(rows: string[][], cfg: ColumnConfig, strictness: Strictness) {
   const byCanon = new Map<string, number>()
   const byPhone = new Map<string, number>()
   const groups: DupMember[][] = []
+  const groupDobs: Set<string>[] = []
+  const disputed: DupMember[][] = []
+  const phoneRows = new Map<string, DupMember[]>()
   const total = Math.max(rows.length - (cfg.start - 1), 1)
+
+  const hasDobConflict = (gid: number, dob: string | null): boolean => {
+    if (!dob) return false
+    return [...(groupDobs[gid] || [])].some((memberDob) => memberDob !== dob)
+  }
+
+  const addDisputed = (member: DupMember) => disputed.push([member])
 
   for (let i = cfg.start - 1; i < rows.length; i++) {
     const row = rows[i] || []
     const fio = getFio(row, cfg)
     const phone = cell(row, cfg.phone)
+    const dobRaw = cfg.dob >= 0 ? row[cfg.dob] : null
+    const dob = normalizeDob(dobRaw)
     const nExact = normalizeName(fio)
     const nFuzz = normalizeFuzzy(nExact)
     const nCanon = canonicalKey(nFuzz)
     const ph = normalizePhone(phone || null)
+
+    if (ph) {
+      if (!phoneRows.has(ph)) phoneRows.set(ph, [])
+      phoneRows.get(ph)!.push({ excelRow: i + 1, fio, phone, type: "" })
+    }
     if (!nFuzz && !ph) continue
 
     let gid = -1
     let type = ""
-    if (nFuzz && byFuzz.has(nFuzz)) { gid = byFuzz.get(nFuzz)!; type = "одинаковое ФИО" }
-    else if (nCanon && byCanon.has(nCanon)) { gid = byCanon.get(nCanon)!; type = "ФИО, другой порядок слов" }
+    let disputedNamesake = false
+    if (nFuzz && byFuzz.has(nFuzz)) {
+      gid = byFuzz.get(nFuzz)!
+      if (hasDobConflict(gid, dob)) {
+        disputedNamesake = true
+        type = DUP_NAMESAKE_TYPE
+      } else type = "одинаковое ФИО"
+    }
+    else if (nCanon && byCanon.has(nCanon)) {
+      gid = byCanon.get(nCanon)!
+      if (hasDobConflict(gid, dob)) {
+        disputedNamesake = true
+        type = DUP_NAMESAKE_TYPE
+      } else type = "ФИО, другой порядок слов"
+    }
     else if (ph && byPhone.has(ph)) { gid = byPhone.get(ph)!; type = "совпал телефон" }
     else if (nFuzz) {
-      const res = matchRecord(idx, fio, null, null, th)
-      if (res.status === "typo" && res.matchedName && byFuzz.has(res.matchedName)) {
+      const res = matchRecord(idx, fio, null, dobRaw, th)
+      if (res.status === "disputed" && res.matchedName && byFuzz.has(res.matchedName)) {
+        gid = byFuzz.get(res.matchedName)!
+        disputedNamesake = true
+        type = DUP_NAMESAKE_TYPE
+      } else if (res.status === "typo" && res.matchedName && byFuzz.has(res.matchedName)) {
         gid = byFuzz.get(res.matchedName)!
         type = "ФИО с опечаткой"
       }
@@ -134,20 +170,36 @@ function runDupes(rows: string[][], cfg: ColumnConfig, strictness: Strictness) {
     if (gid < 0) {
       gid = groups.length
       groups.push([])
+      groupDobs.push(new Set())
       type = ""
     }
-    groups[gid].push({ excelRow: i + 1, fio, phone, type: type || "первое упоминание" })
-    if (nFuzz && !byFuzz.has(nFuzz)) byFuzz.set(nFuzz, gid)
-    if (nCanon && !byCanon.has(nCanon)) byCanon.set(nCanon, gid)
-    if (ph && !byPhone.has(ph)) byPhone.set(ph, gid)
-    addToIndex(idx, fio, null)
+    const member = { excelRow: i + 1, fio, phone, type: type || "первое упоминание" }
+    if (disputedNamesake) {
+      addDisputed(member)
+    } else {
+      groups[gid].push(member)
+      if (dob) groupDobs[gid].add(dob)
+      if (nFuzz && !byFuzz.has(nFuzz)) byFuzz.set(nFuzz, gid)
+      if (nCanon && !byCanon.has(nCanon)) byCanon.set(nCanon, gid)
+      if (ph && !byPhone.has(ph)) byPhone.set(ph, gid)
+    }
+    addToIndex(idx, fio, null, dobRaw)
 
     if (i % 300 === 0) {
       post({ kind: "progress", pct: Math.round((95 * (i - cfg.start + 1)) / total), text: `Ищу дубли… ${(i - cfg.start + 1).toLocaleString("ru-RU")} из ${total.toLocaleString("ru-RU")}` })
     }
   }
   post({ kind: "progress", pct: 100, text: "Поиск завершён" })
-  post({ kind: "dupes-done", groups: groups.filter((g) => g.length > 1), total })
+  const phoneGroups = [...phoneRows.entries()]
+    .filter(([, members]) => members.length > 1)
+    .sort(([phoneA], [phoneB]) => phoneA.localeCompare(phoneB))
+    .map(([, members]) =>
+      members
+        .slice()
+        .sort((a, b) => a.excelRow - b.excelRow)
+        .map((member, index) => ({ ...member, type: index === 0 ? "первое упоминание" : "повтор телефона" })),
+    )
+  post({ kind: "dupes-done", groups: groups.filter((g) => g.length > 1), disputed, phoneGroups, total })
 }
 
 self.onmessage = (e: MessageEvent<WorkerRequest>) => {

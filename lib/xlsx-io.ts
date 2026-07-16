@@ -2,8 +2,9 @@
    Всё выполняется локально в браузере — данные никуда не отправляются. */
 
 import * as XLSX from "xlsx-js-style"
-import { STATUS_LABEL, MATCHED_STATUSES, type MatchStatus } from "@/lib/matching"
+import { STATUS_LABEL, MATCHED_STATUSES, normalizePhone, type MatchStatus } from "@/lib/matching"
 import type { ColumnConfig, RowResult, DupMember } from "@/workers/match.worker"
+import { filterAutoDuplicateMembers, isDisputedNamesake } from "@/lib/dupes"
 
 export interface LoadedFile {
   name: string
@@ -202,15 +203,20 @@ export function buildExport(
 }
 
 /* Отчёт по дублям */
-export function buildDupesFile(groups: DupMember[][]): Blob {
+export function buildDupesFile(groups: DupMember[][], disputed: DupMember[][] = []): Blob {
   const headers = ["Группа", "Строка в файле", "ФИО", "Телефон", "Совпадение"]
   const aoa: (string | number)[][] = [headers]
   const shade: boolean[] = []
   const groupStart: boolean[] = []
+  const disputedRows = [
+    ...disputed.flat(),
+    ...groups.flatMap((grp) => grp.filter((member) => isDisputedNamesake(member.type))),
+  ]
   let g = 1
   for (const grp of groups) {
+    const autoMembers = filterAutoDuplicateMembers(grp)
     let first = true
-    for (const m of grp) {
+    for (const m of autoMembers) {
       aoa.push([g, m.excelRow, m.fio || "", m.phone || "", m.type])
       shade.push(g % 2 === 0)
       groupStart.push(first)
@@ -240,6 +246,69 @@ export function buildDupesFile(groups: DupMember[][]): Blob {
   ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(aoa.length - 1, 1), c: headers.length - 1 } }) }
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, "Дубли")
+  if (disputedRows.length) {
+    const disputedAoa: (string | number)[][] = [["Строка в файле", "ФИО", "Телефон", "Совпадение"]]
+    for (const m of disputedRows) disputedAoa.push([m.excelRow, m.fio || "", m.phone || "", m.type])
+    const disputedWs = XLSX.utils.aoa_to_sheet(disputedAoa)
+    for (let c = 0; c < disputedAoa[0].length; c++) {
+      const addr = XLSX.utils.encode_cell({ r: 0, c })
+      if (disputedWs[addr]) (disputedWs[addr] as { s?: object }).s = { font: { bold: true } }
+    }
+    disputedWs["!cols"] = colWidths(disputedAoa)
+    disputedWs["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(disputedAoa.length - 1, 1), c: disputedAoa[0].length - 1 } }) }
+    XLSX.utils.book_append_sheet(wb, disputedWs, "Спорные тёзки")
+  }
+  return toBlob(wb)
+}
+
+function sortedPhoneGroups(phoneGroups: DupMember[][]): DupMember[][] {
+  const groups = phoneGroups
+    .filter((group) => group.length > 1)
+    .map((group) =>
+      group.slice().sort((a, b) => {
+        const phoneA = normalizePhone(a.phone) || ""
+        const phoneB = normalizePhone(b.phone) || ""
+        return phoneA.localeCompare(phoneB) || a.excelRow - b.excelRow
+      }),
+    )
+  return groups.sort((a, b) => {
+    const phoneA = normalizePhone(a[0]?.phone) || ""
+    const phoneB = normalizePhone(b[0]?.phone) || ""
+    return phoneA.localeCompare(phoneB) || (a[0]?.excelRow || 0) - (b[0]?.excelRow || 0)
+  })
+}
+
+/** Отдельный отчёт по всем строкам, у которых совпал нормализованный телефон. */
+export function buildPhoneReportFile(rows: string[][], cfg: ColumnConfig, phoneGroups: DupMember[][]): Blob {
+  const headerIdx = cfg.start - 2
+  const srcHeader = headerIdx >= 0 ? rows[headerIdx] || [] : []
+  const maxCols = Math.min(Math.max(...rows.map((r) => r.length), 1), 60)
+  const sourceHeaders = Array.from({ length: maxCols }, (_, c) => String(srcHeader[c] || "").trim() || colLetter(c))
+  const headers = ["Группа", "Строка в файле", "Телефон", "ФИО", ...sourceHeaders]
+  const aoa: (string | number)[][] = [headers]
+
+  for (const [groupIndex, group] of sortedPhoneGroups(phoneGroups).entries()) {
+    for (const member of group) {
+      const sourceRow = rows[member.excelRow - 1] || []
+      aoa.push([
+        groupIndex + 1,
+        member.excelRow,
+        member.phone || "",
+        member.fio || "",
+        ...Array.from({ length: maxCols }, (_, c) => sourceRow[c] ?? ""),
+      ])
+    }
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  for (let c = 0; c < headers.length; c++) {
+    const addr = XLSX.utils.encode_cell({ r: 0, c })
+    if (ws[addr]) (ws[addr] as { s?: object }).s = { font: { bold: true } }
+  }
+  ws["!cols"] = colWidths(aoa)
+  ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(aoa.length - 1, 1), c: headers.length - 1 } }) }
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, "Телефоны")
   return toBlob(wb)
 }
 
@@ -265,7 +334,18 @@ function buildStyledCleanSheet(buf: ArrayBuffer, sheetName: string, del: Set<num
     out[XLSX.utils.encode_cell({ r: newR, c: cc.c })] = ws[key]
   }
   out["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: range.s.c }, e: { r: nr - 1, c: range.e.c } })
+  // ширины столбцов
   if (ws["!cols"]) out["!cols"] = ws["!cols"]
+  // высоты строк — пересчитываем индексы
+  if (ws["!rows"]) {
+    const srcRows = ws["!rows"] as unknown[]
+    const dstRows: unknown[] = new Array(nr)
+    for (let r = 0; r < map.length; r++) {
+      if (map[r] >= 0 && srcRows[r] !== undefined) dstRows[map[r]] = srcRows[r]
+    }
+    out["!rows"] = dstRows as XLSX.RowInfo[]
+  }
+  // объединённые ячейки
   if (ws["!merges"]) {
     const merges: XLSX.Range[] = []
     for (const m of ws["!merges"] as XLSX.Range[]) {
@@ -283,6 +363,21 @@ function buildStyledCleanSheet(buf: ArrayBuffer, sheetName: string, del: Set<num
     }
     if (merges.length) out["!merges"] = merges
   }
+  // автофильтр — пересчитываем строку
+  if (ws["!autofilter"]) {
+    const af = ws["!autofilter"] as { ref: string }
+    try {
+      const afRange = XLSX.utils.decode_range(af.ref)
+      const newStart = map[afRange.s.r]
+      const newEnd = map[afRange.e.r] >= 0 ? map[afRange.e.r] : nr - 1
+      if (newStart >= 0)
+        out["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: newStart, c: afRange.s.c }, e: { r: newEnd, c: afRange.e.c } }) }
+    } catch { /* пропустить */ }
+  }
+  // заморозка панелей
+  if ((ws as { "!freeze"?: unknown })["!freeze"]) (out as { "!freeze"?: unknown })["!freeze"] = (ws as { "!freeze"?: unknown })["!freeze"]
+  // защита листа
+  if ((ws as { "!protect"?: unknown })["!protect"]) (out as { "!protect"?: unknown })["!protect"] = (ws as { "!protect"?: unknown })["!protect"]
   return out
 }
 
@@ -295,8 +390,9 @@ export function buildCleanFile(
   const del = new Map<number, { g: number; type: string }>()
   let g = 1
   for (const grp of groups) {
-    for (let i = 1; i < grp.length; i++) {
-      const m = grp[i]
+    const autoMembers = filterAutoDuplicateMembers(grp)
+    for (let i = 1; i < autoMembers.length; i++) {
+      const m = autoMembers[i]
       if (!opts.delPhone && m.type === "совпал телефон") continue // разные люди с общим телефоном — не трогаем
       del.set(m.excelRow, { g, type: m.type })
     }
@@ -320,7 +416,60 @@ export function buildCleanFile(
     ws = XLSX.utils.aoa_to_sheet(keptAoa.length ? keptAoa : [[""]])
     ws["!cols"] = colWidths(keptAoa.length ? keptAoa : [[""]])
   }
-  XLSX.utils.book_append_sheet(wb, ws, "Без дублей")
+  XLSX.utils.book_append_sheet(wb, ws, f.sheet || "Без дублей")
+
+  if (opts.withLog) {
+    let headerRow = f.cfg.start >= 2 ? f.rows[f.cfg.start - 2] || [] : []
+    if (!headerRow.some((v) => String(v ?? "").trim())) {
+      const nCols = Math.max(...[...del.keys()].map((r) => (f.rows[r - 1] || []).length), 1)
+      headerRow = Array.from({ length: nCols }, (_, c) => "Колонка " + (c + 1))
+    }
+    const remAoa: (string | number)[][] = [["Строка в файле", "Группа", "Совпадение", ...headerRow]]
+    for (const [excelRow, info] of [...del.entries()].sort((a, b) => a[0] - b[0])) {
+      remAoa.push([excelRow, info.g, info.type, ...(f.rows[excelRow - 1] || [])])
+    }
+    const ws2 = XLSX.utils.aoa_to_sheet(remAoa)
+    for (let c = 0; c < remAoa[0].length; c++) {
+      const addr = XLSX.utils.encode_cell({ r: 0, c })
+      if (ws2[addr]) (ws2[addr] as { s?: object }).s = { font: { bold: true } }
+    }
+    ws2["!cols"] = colWidths(remAoa)
+    XLSX.utils.book_append_sheet(wb, ws2, "Удалённые")
+  }
+  return { blob: toBlob(wb), removedCount: del.size }
+}
+
+/** Копия листа без повторов телефонов: из каждой телефонной группы остаётся первая строка. */
+export function buildPhoneCleanFile(
+  f: LoadedFile,
+  phoneGroups: DupMember[][],
+  opts: { withLog: boolean },
+): { blob: Blob; removedCount: number } | null {
+  const del = new Map<number, { g: number; type: string }>()
+  for (const [groupIndex, group] of sortedPhoneGroups(phoneGroups).entries()) {
+    for (let i = 1; i < group.length; i++) {
+      del.set(group[i].excelRow, { g: groupIndex + 1, type: "повтор телефона" })
+    }
+  }
+  if (!del.size) return null
+
+  const delSet = new Set(del.keys())
+  const wb = XLSX.utils.book_new()
+  let ws: XLSX.WorkSheet | null = null
+  try {
+    ws = buildStyledCleanSheet(f.buf, f.sheet, delSet)
+  } catch {
+    ws = null
+  }
+  if (!ws) {
+    const keptAoa: string[][] = []
+    for (let i = 0; i < f.rows.length; i++) {
+      if (!delSet.has(i + 1)) keptAoa.push(f.rows[i] || [])
+    }
+    ws = XLSX.utils.aoa_to_sheet(keptAoa.length ? keptAoa : [[""]])
+    ws["!cols"] = colWidths(keptAoa.length ? keptAoa : [[""]])
+  }
+  XLSX.utils.book_append_sheet(wb, ws, f.sheet || "Без повторов телефонов")
 
   if (opts.withLog) {
     let headerRow = f.cfg.start >= 2 ? f.rows[f.cfg.start - 2] || [] : []
