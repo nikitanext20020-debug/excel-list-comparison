@@ -530,7 +530,7 @@ export default function Page() {
 
           {dupes && (
             <>
-              <DupesPanel groups={dupes.groups} disputed={dupes.disputed} total={dupes.total} />
+              <DupesPanel groups={dupes.groups} disputed={dupes.disputed} total={dupes.total} dupDelPhone={dupDelPhone} />
               {dupes.groups.length > 0 ? (
                 <div className="flex flex-wrap gap-3">
                   <button

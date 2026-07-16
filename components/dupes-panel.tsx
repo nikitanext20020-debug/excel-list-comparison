@@ -1,20 +1,24 @@
 "use client"
 
 import type { DupMember } from "@/workers/match.worker"
-import { filterAutoDuplicateMembers } from "@/lib/dupes"
+import { filterAutoDuplicateMembers, countWillDelete } from "@/lib/dupes"
 
 interface DupesPanelProps {
   groups: DupMember[][]
   disputed?: DupMember[][]
   total: number
+  dupDelPhone: boolean
 }
 
-export function DupesPanel({ groups, disputed = [], total }: DupesPanelProps) {
-  const dupRows = groups.reduce((s, g) => s + filterAutoDuplicateMembers(g).length, 0)
+export function DupesPanel({ groups, disputed = [], total, dupDelPhone }: DupesPanelProps) {
+  // строк в дублях = все участники групп без первых упоминаний
+  const dupRows = groups.reduce((s, g) => s + Math.max(filterAutoDuplicateMembers(g).length - 1, 0), 0)
+  // будет удалено = та же логика что в buildCleanFile
+  const willDelete = countWillDelete(groups, dupDelPhone)
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         <div className="flex flex-col gap-0.5 rounded-md border border-border bg-card px-4 py-3">
           <span className="font-mono text-2xl font-semibold tabular-nums">{total.toLocaleString("ru-RU")}</span>
           <span className="text-xs text-muted-foreground">всего строк</span>
@@ -26,6 +30,10 @@ export function DupesPanel({ groups, disputed = [], total }: DupesPanelProps) {
         <div className="flex flex-col gap-0.5 rounded-md border border-border bg-card px-4 py-3">
           <span className="font-mono text-2xl font-semibold tabular-nums text-destructive">{dupRows}</span>
           <span className="text-xs text-muted-foreground">строк в дублях</span>
+        </div>
+        <div className="flex flex-col gap-0.5 rounded-md border border-primary/30 bg-primary/5 px-4 py-3">
+          <span className="font-mono text-2xl font-semibold tabular-nums text-primary">{willDelete}</span>
+          <span className="text-xs text-muted-foreground">будет удалено</span>
         </div>
       </div>
 
@@ -70,13 +78,13 @@ export function DupesPanel({ groups, disputed = [], total }: DupesPanelProps) {
       {disputed.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-accent/40 bg-accent/5">
           <div className="border-b border-accent/30 px-3 py-2 text-sm font-semibold text-accent-foreground">
-            Спорные тёзки — ручная проверка ({disputed.length})
+            Спорные тёзки — ручная проверка ({disputed.length} пар)
           </div>
           <table className="w-full border-collapse text-sm">
             <caption className="sr-only">Спорные тёзки с разными датами рождения</caption>
             <thead>
               <tr className="border-b border-accent/20 bg-muted/50">
-                {["Строка", "ФИО", "Телефон", "Совпадение"].map((h) => (
+                {["Конфликт", "Строка", "ФИО", "Телефон", "Совпадение"].map((h) => (
                   <th key={h} className="px-3 py-2 text-left font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
                     {h}
                   </th>
@@ -84,17 +92,23 @@ export function DupesPanel({ groups, disputed = [], total }: DupesPanelProps) {
               </tr>
             </thead>
             <tbody>
-              {disputed.slice(0, 50).map(([m]) => (
-                <tr key={m.excelRow} className="border-b border-accent/10 last:border-0">
-                  <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{m.excelRow}</td>
-                  <td className="px-3 py-1.5">{m.fio || "—"}</td>
-                  <td className="px-3 py-1.5 font-mono text-xs">{m.phone || ""}</td>
-                  <td className="px-3 py-1.5 text-xs font-medium text-accent-foreground">{m.type}</td>
-                </tr>
-              ))}
+              {disputed.slice(0, 50).map((pair, pi) =>
+                pair.map((m, mi) => (
+                  <tr
+                    key={`${pi}-${m.excelRow}`}
+                    className={`border-b border-accent/10 last:border-0 ${mi === 0 ? "border-t border-accent/30" : ""}`}
+                  >
+                    <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{mi === 0 ? `#${pi + 1}` : ""}</td>
+                    <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{m.excelRow}</td>
+                    <td className="px-3 py-1.5">{m.fio || "—"}</td>
+                    <td className="px-3 py-1.5 font-mono text-xs">{m.phone || ""}</td>
+                    <td className="px-3 py-1.5 text-xs font-medium text-accent-foreground">{m.type}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
-          {disputed.length > 50 && <p className="border-t border-accent/20 px-3 py-2 text-xs text-muted-foreground">Показаны первые 50 случаев — полный список будет в отчёте.</p>}
+          {disputed.length > 50 && <p className="border-t border-accent/20 px-3 py-2 text-xs text-muted-foreground">Показаны первые 50 пар — полный список будет в отчёте.</p>}
         </div>
       )}
     </div>

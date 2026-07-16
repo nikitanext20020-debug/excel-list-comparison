@@ -313,18 +313,37 @@ export function buildPhoneReportFile(rows: string[][], cfg: ColumnConfig, phoneG
 }
 
 /* Копия листа без удалённых строк с сохранением стилей исходника */
-function buildStyledCleanSheet(buf: ArrayBuffer, sheetName: string, del: Set<number>): XLSX.WorkSheet | null {
+function buildStyledCleanSheet(buf: ArrayBuffer, sheetName: string, del: Set<number>): XLSX.WorkSheet {
+  // П.5: убрать молчаливый фолбэк — читаем с cellStyles, логируем если не работает
   const wb2 = XLSX.read(buf, { type: "array", cellStyles: true, cellNF: true } as XLSX.ParsingOptions)
   const ws = wb2.Sheets[sheetName]
-  if (!ws || !ws["!ref"]) return null
+  if (!ws || !ws["!ref"]) {
+    throw new Error(`Лист «${sheetName}» не найден или пуст в буфере файла`)
+  }
+
+  // Проверяем что стили действительно читаются
   const range = XLSX.utils.decode_range(ws["!ref"] as string)
+  let stylesFound = 0
+  for (const key in ws) {
+    if (key[0] === "!") continue
+    const cell = ws[key] as { s?: object }
+    if (cell?.s) stylesFound++
+    if (stylesFound >= 3) break
+  }
+  if (stylesFound === 0) {
+    console.warn(`[buildStyledCleanSheet] xlsx-js-style не вернул стили для листа «${sheetName}». Форматирование может не сохраниться.`)
+  }
+
   const map = new Array(range.e.r + 1).fill(-1)
   let nr = 0
   for (let r = 0; r <= range.e.r; r++) {
     if (del.has(r + 1)) continue
     map[r] = nr++
   }
-  if (!nr) return null
+  if (!nr) {
+    throw new Error("После удаления дублей не осталось ни одной строки")
+  }
+
   const out: XLSX.WorkSheet = {}
   for (const key in ws) {
     if (key[0] === "!") continue
@@ -381,20 +400,221 @@ function buildStyledCleanSheet(buf: ArrayBuffer, sheetName: string, del: Set<num
   return out
 }
 
+/* ===== Вспомогательные стили для листа «Удалённые» ===== */
+
+const STYLE_HEADER = {
+  font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 },
+  fill: { patternType: "solid", fgColor: { rgb: "4472C4" } },
+  alignment: { horizontal: "center", vertical: "center", wrapText: true },
+  border: {
+    top: { style: "thin", color: { rgb: "CCCCCC" } },
+    bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+    left: { style: "thin", color: { rgb: "CCCCCC" } },
+    right: { style: "thin", color: { rgb: "CCCCCC" } },
+  },
+}
+
+const STYLE_KEPT = {
+  fill: { patternType: "solid", fgColor: { rgb: "E2EFDA" } },
+  border: {
+    top: { style: "thin", color: { rgb: "CCCCCC" } },
+    bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+    left: { style: "thin", color: { rgb: "CCCCCC" } },
+    right: { style: "thin", color: { rgb: "CCCCCC" } },
+  },
+}
+
+const STYLE_DELETED = {
+  fill: { patternType: "solid", fgColor: { rgb: "FCE4E4" } },
+  border: {
+    top: { style: "thin", color: { rgb: "CCCCCC" } },
+    bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+    left: { style: "thin", color: { rgb: "CCCCCC" } },
+    right: { style: "thin", color: { rgb: "CCCCCC" } },
+  },
+}
+
+const STYLE_ZEBRA = {
+  fill: { patternType: "solid", fgColor: { rgb: "F2F2F2" } },
+  border: {
+    top: { style: "thin", color: { rgb: "CCCCCC" } },
+    bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+    left: { style: "thin", color: { rgb: "CCCCCC" } },
+    right: { style: "thin", color: { rgb: "CCCCCC" } },
+  },
+}
+
+const STYLE_PLAIN = {
+  border: {
+    top: { style: "thin", color: { rgb: "CCCCCC" } },
+    bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+    left: { style: "thin", color: { rgb: "CCCCCC" } },
+    right: { style: "thin", color: { rgb: "CCCCCC" } },
+  },
+}
+
+const STYLE_GROUP_TOP_BORDER = {
+  border: {
+    top: { style: "medium", color: { rgb: "4472C4" } },
+    bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+    left: { style: "thin", color: { rgb: "CCCCCC" } },
+    right: { style: "thin", color: { rgb: "CCCCCC" } },
+  },
+}
+
+/**
+ * Строит оформленный лист «Удалённые».
+ * Строка 1: пояснение (объединённые ячейки, жирный).
+ * Строка 3: шапка (синяя, белый жирный).
+ * С строки 4: данные. Для каждой группы — «оставлен в списке» (зелёный) + «удалён» (красный).
+ * Зебра по группам, синяя рамка сверху первой строки каждой группы.
+ */
+function buildDeletedSheet(
+  rows: string[][],
+  cfg: ColumnConfig,
+  groupsData: { groupNum: number; kept: number; deleted: number[]; type: string }[],
+  explanation: string,
+): XLSX.WorkSheet {
+  const headerIdx = cfg.start - 2
+  let srcHeader = headerIdx >= 0 ? rows[headerIdx] || [] : []
+  const maxCols = Math.min(Math.max(...rows.map((r) => r.length), 1), 60)
+  if (!srcHeader.some((v) => String(v ?? "").trim())) {
+    srcHeader = Array.from({ length: maxCols }, (_, c) => "Колонка " + (c + 1))
+  }
+  const srcColHeaders = Array.from({ length: maxCols }, (_, c) => String(srcHeader[c] || "").trim() || colLetter(c))
+
+  // Шапка: Группа | Строка в исх. файле | Статус | <исходные колонки> | Признак совпадения
+  const headerCols = ["Группа", "Строка в исходном файле", "Статус", ...srcColHeaders, "Признак совпадения"]
+  const totalCols = headerCols.length
+
+  // aoa: строка 0 — пояснение, строка 1 — пустая, строка 2 — шапка, с строки 3 — данные
+  const aoa: (string | number)[][] = []
+  // строка 0 — пояснение
+  const explanationRow: (string | number)[] = [explanation]
+  for (let c = 1; c < totalCols; c++) explanationRow.push("")
+  aoa.push(explanationRow)
+  // строка 1 — пустая
+  aoa.push(Array(totalCols).fill(""))
+  // строка 2 — шапка
+  aoa.push(headerCols)
+
+  // данные
+  const rowMeta: { isKept: boolean; groupNum: number; isGroupStart: boolean }[] = []
+
+  for (const { groupNum, kept, deleted, type } of groupsData) {
+    // первая строка группы — «оставлен в списке»
+    const keptRow = rows[kept - 1] || []
+    const dataRow: (string | number)[] = [
+      groupNum,
+      kept,
+      "оставлен в списке",
+      ...Array.from({ length: maxCols }, (_, c) => keptRow[c] ?? ""),
+      type,
+    ]
+    aoa.push(dataRow)
+    rowMeta.push({ isKept: true, groupNum, isGroupStart: true })
+
+    // удалённые строки
+    for (const delRow of deleted) {
+      const srcRow = rows[delRow - 1] || []
+      aoa.push([
+        groupNum,
+        delRow,
+        "удалён",
+        ...Array.from({ length: maxCols }, (_, c) => srcRow[c] ?? ""),
+        type,
+      ])
+      rowMeta.push({ isKept: false, groupNum, isGroupStart: false })
+    }
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+
+  // Объединяем ячейки пояснения (строка 0)
+  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } }]
+
+  // Стиль пояснения
+  const explanationAddr = XLSX.utils.encode_cell({ r: 0, c: 0 })
+  if (!ws[explanationAddr]) ws[explanationAddr] = { t: "s", v: explanation }
+  ;(ws[explanationAddr] as { s?: object }).s = { font: { bold: true, sz: 10 }, alignment: { wrapText: true, vertical: "center" } }
+
+  // Стиль шапки (строка 2)
+  for (let c = 0; c < totalCols; c++) {
+    const addr = XLSX.utils.encode_cell({ r: 2, c })
+    if (!ws[addr]) ws[addr] = { t: "s", v: "" }
+    ;(ws[addr] as { s?: object }).s = STYLE_HEADER
+  }
+
+  // Стиль данных (с строки 3)
+  for (let ri = 0; ri < rowMeta.length; ri++) {
+    const { isKept, groupNum, isGroupStart } = rowMeta[ri]
+    const sheetRow = ri + 3 // 0=пояснение, 1=пустая, 2=шапка, с 3 — данные
+    const isEvenGroup = groupNum % 2 === 0
+
+    for (let c = 0; c < totalCols; c++) {
+      const addr = XLSX.utils.encode_cell({ r: sheetRow, c })
+      if (!ws[addr]) ws[addr] = { t: "s", v: "" }
+
+      let style: object
+      if (isKept) {
+        style = isGroupStart
+          ? { ...STYLE_KEPT, border: { ...STYLE_KEPT.border, top: { style: "medium", color: { rgb: "4472C4" } } } }
+          : STYLE_KEPT
+      } else if (isGroupStart) {
+        style = { ...STYLE_DELETED, border: { ...STYLE_DELETED.border, top: { style: "medium", color: { rgb: "4472C4" } } } }
+      } else if (isEvenGroup) {
+        style = STYLE_ZEBRA
+      } else {
+        style = STYLE_PLAIN
+      }
+
+      ;(ws[addr] as { s?: object }).s = style
+    }
+  }
+
+  // Ширины столбцов
+  ws["!cols"] = [{ wch: 8 }, { wch: 14 }, { wch: 18 }, ...Array.from({ length: maxCols }, () => ({ wch: 18 })), { wch: 28 }]
+
+  // Автофильтр на шапку + данные
+  const dataEnd = 2 + rowMeta.length
+  ws["!autofilter"] = {
+    ref: XLSX.utils.encode_range({ s: { r: 2, c: 0 }, e: { r: Math.max(dataEnd, 3), c: totalCols - 1 } }),
+  }
+
+  // Закрепление областей — начиная со строки 4 (после шапки)
+  ;(ws as { "!freeze"?: unknown })["!freeze"] = { xSplit: 0, ySplit: 3, topLeftCell: "A4", activePane: "bottomLeft" }
+
+  // Высота строки пояснения
+  ws["!rows"] = [{ hpt: 32 }] as XLSX.RowInfo[]
+
+  return ws
+}
+
 /* Файл без дублей: из каждой группы остаётся первое упоминание */
 export function buildCleanFile(
   f: LoadedFile,
   groups: DupMember[][],
   opts: { withLog: boolean; delPhone: boolean },
 ): { blob: Blob; removedCount: number } | null {
+  // Строим структуру удаляемых строк + данные для листа «Удалённые»
   const del = new Map<number, { g: number; type: string }>()
+  const groupsForLog: { groupNum: number; kept: number; deleted: number[]; type: string }[] = []
   let g = 1
   for (const grp of groups) {
     const autoMembers = filterAutoDuplicateMembers(grp)
+    if (autoMembers.length === 0) { g++; continue }
+    const keptRow = autoMembers[0].excelRow
+    const deletedRows: number[] = []
+    let matchType = autoMembers[0].type
     for (let i = 1; i < autoMembers.length; i++) {
       const m = autoMembers[i]
-      if (!opts.delPhone && m.type === "совпал телефон") continue // разные люди с общим телефоном — не трогаем
+      if (!opts.delPhone && m.type === "совпал телефон") continue
       del.set(m.excelRow, { g, type: m.type })
+      deletedRows.push(m.excelRow)
+      matchType = m.type
+    }
+    if (opts.withLog) {
+      groupsForLog.push({ groupNum: g, kept: keptRow, deleted: deletedRows, type: matchType })
     }
     g++
   }
@@ -402,40 +622,33 @@ export function buildCleanFile(
 
   const delSet = new Set(del.keys())
   const wb = XLSX.utils.book_new()
-  let ws: XLSX.WorkSheet | null = null
+
+  // П.5: убрать молчаливый фолбэк — логируем ошибку, не подменяем голым листом
+  let ws: XLSX.WorkSheet
   try {
     ws = buildStyledCleanSheet(f.buf, f.sheet, delSet)
-  } catch {
-    ws = null
+  } catch (err) {
+    console.error("[buildCleanFile] Не удалось сохранить стили исходного листа:", err)
+    // Фолбэк только если стили совсем не читаются — сообщаем пользователю через throw
+    throw new Error(
+      "Не удалось сохранить форматирование исходного файла: " +
+      (err instanceof Error ? err.message : String(err)) +
+      ". Пересохраните файл как обычный .xlsx и попробуйте снова."
+    )
   }
-  if (!ws) {
-    const keptAoa: string[][] = []
-    for (let i = 0; i < f.rows.length; i++) {
-      if (!delSet.has(i + 1)) keptAoa.push(f.rows[i] || [])
-    }
-    ws = XLSX.utils.aoa_to_sheet(keptAoa.length ? keptAoa : [[""]])
-    ws["!cols"] = colWidths(keptAoa.length ? keptAoa : [[""]])
-  }
+
   XLSX.utils.book_append_sheet(wb, ws, f.sheet || "Без дублей")
 
-  if (opts.withLog) {
-    let headerRow = f.cfg.start >= 2 ? f.rows[f.cfg.start - 2] || [] : []
-    if (!headerRow.some((v) => String(v ?? "").trim())) {
-      const nCols = Math.max(...[...del.keys()].map((r) => (f.rows[r - 1] || []).length), 1)
-      headerRow = Array.from({ length: nCols }, (_, c) => "Колонка " + (c + 1))
-    }
-    const remAoa: (string | number)[][] = [["Строка в файле", "Группа", "Совпадение", ...headerRow]]
-    for (const [excelRow, info] of [...del.entries()].sort((a, b) => a[0] - b[0])) {
-      remAoa.push([excelRow, info.g, info.type, ...(f.rows[excelRow - 1] || [])])
-    }
-    const ws2 = XLSX.utils.aoa_to_sheet(remAoa)
-    for (let c = 0; c < remAoa[0].length; c++) {
-      const addr = XLSX.utils.encode_cell({ r: 0, c })
-      if (ws2[addr]) (ws2[addr] as { s?: object }).s = { font: { bold: true } }
-    }
-    ws2["!cols"] = colWidths(remAoa)
+  if (opts.withLog && groupsForLog.length > 0) {
+    const ws2 = buildDeletedSheet(
+      f.rows,
+      f.cfg,
+      groupsForLog,
+      "Строки указаны по исходному файлу (до удаления). В основном списке оставлена первая строка группы, остальные удалены.",
+    )
     XLSX.utils.book_append_sheet(wb, ws2, "Удалённые")
   }
+
   return { blob: toBlob(wb), removedCount: del.size }
 }
 
@@ -446,49 +659,48 @@ export function buildPhoneCleanFile(
   opts: { withLog: boolean },
 ): { blob: Blob; removedCount: number } | null {
   const del = new Map<number, { g: number; type: string }>()
+  const groupsForLog: { groupNum: number; kept: number; deleted: number[]; type: string }[] = []
   for (const [groupIndex, group] of sortedPhoneGroups(phoneGroups).entries()) {
+    const groupNum = groupIndex + 1
+    const keptRow = group[0].excelRow
+    const deletedRows: number[] = []
     for (let i = 1; i < group.length; i++) {
-      del.set(group[i].excelRow, { g: groupIndex + 1, type: "повтор телефона" })
+      del.set(group[i].excelRow, { g: groupNum, type: "повтор телефона" })
+      deletedRows.push(group[i].excelRow)
+    }
+    if (opts.withLog && deletedRows.length > 0) {
+      groupsForLog.push({ groupNum, kept: keptRow, deleted: deletedRows, type: "повтор телефона" })
     }
   }
   if (!del.size) return null
 
   const delSet = new Set(del.keys())
   const wb = XLSX.utils.book_new()
-  let ws: XLSX.WorkSheet | null = null
+
+  let ws: XLSX.WorkSheet
   try {
     ws = buildStyledCleanSheet(f.buf, f.sheet, delSet)
-  } catch {
-    ws = null
+  } catch (err) {
+    console.error("[buildPhoneCleanFile] Не удалось сохранить стили исходного листа:", err)
+    throw new Error(
+      "Не удалось сохранить форматирование исходного файла: " +
+      (err instanceof Error ? err.message : String(err)) +
+      ". Пересохраните файл как обычный .xlsx и попробуйте снова."
+    )
   }
-  if (!ws) {
-    const keptAoa: string[][] = []
-    for (let i = 0; i < f.rows.length; i++) {
-      if (!delSet.has(i + 1)) keptAoa.push(f.rows[i] || [])
-    }
-    ws = XLSX.utils.aoa_to_sheet(keptAoa.length ? keptAoa : [[""]])
-    ws["!cols"] = colWidths(keptAoa.length ? keptAoa : [[""]])
-  }
+
   XLSX.utils.book_append_sheet(wb, ws, f.sheet || "Без повторов телефонов")
 
-  if (opts.withLog) {
-    let headerRow = f.cfg.start >= 2 ? f.rows[f.cfg.start - 2] || [] : []
-    if (!headerRow.some((v) => String(v ?? "").trim())) {
-      const nCols = Math.max(...[...del.keys()].map((r) => (f.rows[r - 1] || []).length), 1)
-      headerRow = Array.from({ length: nCols }, (_, c) => "Колонка " + (c + 1))
-    }
-    const remAoa: (string | number)[][] = [["Строка в файле", "Группа", "Совпадение", ...headerRow]]
-    for (const [excelRow, info] of [...del.entries()].sort((a, b) => a[0] - b[0])) {
-      remAoa.push([excelRow, info.g, info.type, ...(f.rows[excelRow - 1] || [])])
-    }
-    const ws2 = XLSX.utils.aoa_to_sheet(remAoa)
-    for (let c = 0; c < remAoa[0].length; c++) {
-      const addr = XLSX.utils.encode_cell({ r: 0, c })
-      if (ws2[addr]) (ws2[addr] as { s?: object }).s = { font: { bold: true } }
-    }
-    ws2["!cols"] = colWidths(remAoa)
+  if (opts.withLog && groupsForLog.length > 0) {
+    const ws2 = buildDeletedSheet(
+      f.rows,
+      f.cfg,
+      groupsForLog,
+      "Строки указаны по исходному файлу (до удаления). В основном списке оставлена первая строка каждой телефонной группы, остальные удалены.",
+    )
     XLSX.utils.book_append_sheet(wb, ws2, "Удалённые")
   }
+
   return { blob: toBlob(wb), removedCount: del.size }
 }
 
