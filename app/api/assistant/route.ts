@@ -9,10 +9,10 @@ const SYSTEM_PROMPT = `Ты — ИИ-помощник на сайте «Свер
 Ты свободный помощник: отвечай на любые вопросы и выполняй любые просьбы пользователя — по сверке, спискам или на совершенно посторонние темы. Отвечай по-русски (если не попросили иначе), по делу и без лишних отказов.`
 
 export async function POST(req: Request) {
-  const apiKey = process.env.OPENMODEL_API_KEY
+  const apiKey = process.env.ROUTERAI_API_KEY
   if (!apiKey) {
     return Response.json(
-      { error: "OPENMODEL_API_KEY не настроен. Добавьте ключ в переменные окружения проекта." },
+      { error: "ROUTERAI_API_KEY не настроен. Добавьте ключ в переменные окружения проекта." },
       { status: 500 },
     )
   }
@@ -35,42 +35,51 @@ export async function POST(req: Request) {
       : SYSTEM_PROMPT
 
   try {
-    // OpenModel отдаёт deepseek-v4-flash по Anthropic-протоколу «messages»
-    const res = await fetch("https://api.openmodel.ai/v1/messages", {
+    const res = await fetch("https://routerai.ru/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
-        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "deepseek-v4-flash",
-        system,
-        messages: messages.map((m) => ({
-          role: m.role === "assistant" ? "assistant" : "user",
-          content: String(m.content).slice(0, 4000),
-        })),
+        model: "deepseek/deepseek-v4-flash",
+        messages: [
+          { role: "system", content: system },
+          ...messages.map((m) => ({
+            role: m.role === "assistant" ? "assistant" : "user",
+            content: String(m.content).slice(0, 4000),
+          })),
+        ],
         max_tokens: 2048,
       }),
     })
 
     if (!res.ok) {
       const text = await res.text()
-      console.log("[v0] OpenModel API error:", res.status, text.slice(0, 300))
+      console.log("[v0] RouterAI API error:", res.status, text.slice(0, 300))
       return Response.json({ error: `Сервис ИИ ответил ошибкой (${res.status}). Попробуйте позже.` }, { status: 502 })
     }
 
     const data = await res.json()
-    // Модель «думающая»: content содержит блоки thinking и text — берём только text
-    const blocks: { type: string; text?: string }[] = Array.isArray(data?.content) ? data.content : []
-    const answer = blocks
-      .filter((b) => b.type === "text" && b.text)
-      .map((b) => b.text)
-      .join("\n")
-      .trim()
+    const content = data?.choices?.[0]?.message?.content
+    const answer =
+      typeof content === "string"
+        ? content.trim()
+        : Array.isArray(content)
+          ? content
+              .map((part: unknown) => {
+                if (typeof part === "string") return part
+                if (part && typeof part === "object" && "text" in part) {
+                  return String((part as { text?: unknown }).text ?? "")
+                }
+                return ""
+              })
+              .join("\n")
+              .trim()
+          : ""
     return Response.json({ answer: answer || "Модель не дала ответа, попробуйте переформулировать вопрос." })
   } catch (e) {
-    console.log("[v0] OpenModel fetch failed:", e instanceof Error ? e.message : e)
+    console.log("[v0] RouterAI fetch failed:", e instanceof Error ? e.message : e)
     return Response.json({ error: "Не удалось связаться с сервисом ИИ." }, { status: 502 })
   }
 }

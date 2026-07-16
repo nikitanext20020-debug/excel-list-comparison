@@ -9,7 +9,7 @@ import { BlurInText } from "@/components/blur-in-text"
 import { AiAssistant } from "@/components/ai-assistant"
 import { SwapFilesButton } from "@/components/swap-files-button"
 import type { LoadedFile } from "@/lib/xlsx-io"
-import { buildColored, buildExport, buildDupesFile, buildCleanFile, downloadBlob } from "@/lib/xlsx-io"
+import { buildColored, buildExport, buildDupesFile, buildCleanFile, buildPhoneReportFile, buildPhoneCleanFile, downloadBlob } from "@/lib/xlsx-io"
 import type { Strictness } from "@/lib/matching"
 import type { RowResult, DupMember, WorkerResponse, WorkerRequest, ColumnConfig } from "@/workers/match.worker"
 
@@ -84,12 +84,13 @@ export default function Page() {
   const [paintRed, setPaintRed] = useState(false)
   const [dupWithLog, setDupWithLog] = useState(true)
   const [dupDelPhone, setDupDelPhone] = useState(false)
+  const [dupPhoneReport, setDupPhoneReport] = useState(false)
 
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<{ pct: number; text: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [compareRes, setCompareRes] = useState<{ results: RowResult[]; dbCount: number } | null>(null)
-  const [dupes, setDupes] = useState<{ groups: DupMember[][]; total: number } | null>(null)
+  const [dupes, setDupes] = useState<{ groups: DupMember[][]; disputed: DupMember[][]; phoneGroups: DupMember[][]; total: number } | null>(null)
   const [decisions, setDecisions] = useState<Record<number, Decision>>({})
   const [downloadNote, setDownloadNote] = useState<string | null>(null)
 
@@ -136,7 +137,7 @@ export default function Page() {
         setCompareRes({ results: msg.results, dbCount: msg.dbCount })
         setRunning(false)
       } else if (msg.kind === "dupes-done") {
-        setDupes({ groups: msg.groups, total: msg.total })
+        setDupes({ groups: msg.groups, disputed: msg.disputed ?? [], phoneGroups: msg.phoneGroups ?? [], total: msg.total })
         setRunning(false)
       } else if (msg.kind === "error") {
         setError("Ошибка: " + msg.message + ". Если файл сложный (защита, макросы) — пересохраните его как обычный .xlsx.")
@@ -186,7 +187,7 @@ export default function Page() {
   function downloadDupesReport() {
     if (!fileA || !dupes) return
     const base = fileA.name.replace(/\.[^.]+$/, "")
-    downloadBlob(buildDupesFile(dupes.groups), base + "_ДУБЛИ.xlsx")
+    downloadBlob(buildDupesFile(dupes.groups, dupes.disputed), base + "_ДУБЛИ.xlsx")
     setDownloadNote("Отчёт по дублям скачан.")
   }
 
@@ -199,6 +200,25 @@ export default function Page() {
       return
     }
     downloadBlob(out.blob, base + "_БЕЗ_ДУБЛЕЙ.xlsx")
+    setDownloadNote(`Удалено строк: ${out.removedCount}. Файл скачан.`)
+  }
+
+  function downloadPhoneReport() {
+    if (!fileA || !dupes || !dupes.phoneGroups.length) return
+    const base = fileA.name.replace(/\.[^.]+$/, "")
+    downloadBlob(buildPhoneReportFile(fileA.rows, fileA.cfg, dupes.phoneGroups), base + "_ТЕЛЕФОНЫ.xlsx")
+    setDownloadNote("Список одинаковых телефонов скачан.")
+  }
+
+  function downloadPhoneClean() {
+    if (!fileA || !dupes || !dupes.phoneGroups.length) return
+    const base = fileA.name.replace(/\.[^.]+$/, "")
+    const out = buildPhoneCleanFile(fileA, dupes.phoneGroups, { withLog: dupWithLog })
+    if (!out) {
+      setDownloadNote("Нечего удалять: одинаковых телефонов не найдено.")
+      return
+    }
+    downloadBlob(out.blob, base + "_БЕЗ_ПОВТОРОВ_ТЕЛЕФОНОВ.xlsx")
     setDownloadNote(`Удалено строк: ${out.removedCount}. Файл скачан.`)
   }
 
@@ -425,6 +445,16 @@ export default function Page() {
                   <input type="checkbox" checked={dupDelPhone} onChange={(e) => setDupDelPhone(e.target.checked)} className="h-4 w-4 accent-primary" />
                   удалять и совпадения только по телефону
                 </label>
+                <label className="hint-trigger relative flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={dupPhoneReport} onChange={(e) => setDupPhoneReport(e.target.checked)} className="h-4 w-4 accent-primary" />
+                  отдельно собрать совпадения по телефону
+                  <span
+                    role="tooltip"
+                    className="hint-bubble glow-primary-soft pointer-events-none absolute left-0 top-full z-20 mt-2 w-72 rounded-lg border border-primary/30 bg-popover p-3 text-left text-[11px] font-normal leading-relaxed text-popover-foreground"
+                  >
+                    Собирает все строки с одинаковым номером телефона, даже если ФИО разные. Полезно для поиска записей, оформленных на один номер
+                  </span>
+                </label>
               </div>
             )}
           </div>
@@ -500,7 +530,7 @@ export default function Page() {
 
           {dupes && (
             <>
-              <DupesPanel groups={dupes.groups} total={dupes.total} />
+              <DupesPanel groups={dupes.groups} disputed={dupes.disputed} total={dupes.total} />
               {dupes.groups.length > 0 ? (
                 <div className="flex flex-wrap gap-3">
                   <button
@@ -518,8 +548,42 @@ export default function Page() {
                     Скачать отчёт по дублям
                   </button>
                 </div>
+              ) : dupes.disputed.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={downloadDupesReport}
+                    className="btn-lift rounded-lg border border-primary/40 bg-primary/10 px-6 py-2.5 text-sm font-semibold text-primary hover:bg-primary/20"
+                  >
+                    Скачать отчёт по дублям
+                  </button>
+                  <p className="text-sm text-muted-foreground">Автоматических дублей нет: спорные тёзки не удаляются.</p>
+                </div>
               ) : (
                 <p className="text-sm text-muted-foreground">Дубли не найдены — файл чистый.</p>
+              )}
+              {dupPhoneReport && dupes.phoneGroups.length > 0 && (
+                <div className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-4">
+                  <p className="text-sm font-semibold text-primary">
+                    Одинаковые телефоны: {dupes.phoneGroups.length} групп, {dupes.phoneGroups.reduce((sum, group) => sum + group.length, 0)} строк
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={downloadPhoneReport}
+                      className="btn-lift rounded-lg border border-primary/40 bg-primary/10 px-6 py-2.5 text-sm font-semibold text-primary hover:bg-primary/20"
+                    >
+                      Скачать список одинаковых телефонов
+                    </button>
+                    <button
+                      type="button"
+                      onClick={downloadPhoneClean}
+                      className="btn-lift rounded-lg bg-foreground px-6 py-2.5 text-sm font-bold text-background shadow-[0_0_24px_rgba(230,237,247,0.18)] hover:opacity-90"
+                    >
+                      Скачать файл без повторов телефонов
+                    </button>
+                  </div>
+                </div>
               )}
             </>
           )}
@@ -565,7 +629,7 @@ export default function Page() {
               .map((r) => `строка ${r.excelRow}: ${r.fio} — ${r.res.status === "disputed" ? `спорный (${r.res.reason ?? "?"})` : "не найден"}`)
             if (detail.length) parts.push(`Спорные и не найденные:\n${detail.join("\n")}`)
           }
-          if (dupes) parts.push(`Поиск дублей: групп ${dupes.groups.length}, всего повторов ${dupes.total}.`)
+          if (dupes) parts.push(`Поиск дублей: групп ${dupes.groups.length}, спорных тёзок ${dupes.disputed.length}, всего строк ${dupes.total}.`)
           return parts.length ? parts.join("\n\n") : undefined
         })()}
       />
