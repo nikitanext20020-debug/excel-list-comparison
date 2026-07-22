@@ -45,7 +45,7 @@ export interface DupMember {
 
 export type WorkerRequest =
   | { kind: "compare"; rows1: string[][]; cfg1: ColumnConfig; rows2: string[][]; cfg2: ColumnConfig; strictness: Strictness }
-  | { kind: "dupes"; rows1: string[][]; cfg1: ColumnConfig; strictness: Strictness }
+  | { kind: "dupes"; rows1: string[][]; rawRows1?: unknown[][]; cfg1: ColumnConfig; strictness: Strictness }
 
 export type WorkerResponse =
   | { kind: "progress"; pct: number; text: string }
@@ -102,7 +102,7 @@ function runCompare(rows1: string[][], cfg1: ColumnConfig, rows2: string[][], cf
   post({ kind: "compare-done", results, counts, dbCount: idx.count })
 }
 
-function runDupes(rows: string[][], cfg: ColumnConfig, strictness: Strictness) {
+function runDupes(rows: string[][], rawRows: unknown[][] | undefined, cfg: ColumnConfig, strictness: Strictness) {
   const th = THRESHOLD_PRESETS[strictness]
   const idx = makeIndex()
 
@@ -117,6 +117,9 @@ function runDupes(rows: string[][], cfg: ColumnConfig, strictness: Strictness) {
   // БАГ 1 FIX: храним ДР отдельно по ФИО-ключу внутри каждой группы
   // groupFioDobs[gid] = Map<nFuzz, Set<dob>>
   const groupFioDobs: Map<string, Set<string>>[] = []
+  // Телефоны храним по тому же ФИО-ключу: совпавший телефон подтверждает
+  // личность даже при различающихся заполненных датах рождения.
+  const groupFioPhones: Map<string, Set<string>>[] = []
 
   // БАГ 2 FIX: disputed — пары конфликтов [представитель_группы_А, тёзка]
   const disputedPairs: DupMember[][] = []
@@ -150,12 +153,34 @@ function runDupes(rows: string[][], cfg: ColumnConfig, strictness: Strictness) {
     return [...dobsForFio].some((memberDob) => memberDob !== dob)
   }
 
+  const hasPhoneMatch = (gid: number, nFuzzKey: string | null, ph: string | null): boolean => {
+    if (!ph || !nFuzzKey) return false
+    return groupFioPhones[gid]?.get(nFuzzKey)?.has(ph) ?? false
+  }
+
+  // Для ФИО с другим порядком слов находим фактический ключ, под которым
+  // участники уже зарегистрированы внутри группы.
+  const matchingFioKey = (gid: number, nFuzzKey: string | null, nCanonKey: string | null): string | null => {
+    if (!nFuzzKey) return null
+    const keys = new Set([
+      ...(groupFioDobs[gid]?.keys() ?? []),
+      ...(groupFioPhones[gid]?.keys() ?? []),
+    ])
+    for (const key of keys) {
+      if (key === nFuzzKey || (nCanonKey && canonicalKey(key) === nCanonKey)) return key
+    }
+    return nFuzzKey
+  }
+
   // Регистрирует строку в группе (обновляет индексы, ДР-карту)
   const registerInGroup = (gid: number, nFuzzKey: string | null, nCanonKey: string | null, ph: string | null, dob: string | null) => {
     if (!groupFioDobs[gid]) groupFioDobs[gid] = new Map()
+    if (!groupFioPhones[gid]) groupFioPhones[gid] = new Map()
     if (nFuzzKey) {
       if (!groupFioDobs[gid].has(nFuzzKey)) groupFioDobs[gid].set(nFuzzKey, new Set())
       if (dob) groupFioDobs[gid].get(nFuzzKey)!.add(dob)
+      if (!groupFioPhones[gid].has(nFuzzKey)) groupFioPhones[gid].set(nFuzzKey, new Set())
+      if (ph) groupFioPhones[gid].get(nFuzzKey)!.add(ph)
     }
     if (nFuzzKey && !byFuzz.has(nFuzzKey)) byFuzz.set(nFuzzKey, gid)
     if (nCanonKey && !byCanon.has(nCanonKey)) byCanon.set(nCanonKey, gid)
@@ -166,7 +191,7 @@ function runDupes(rows: string[][], cfg: ColumnConfig, strictness: Strictness) {
     const row = rows[i] || []
     const fio = getFio(row, cfg)
     const phone = cell(row, cfg.phone)
-    const dobRaw = cfg.dob >= 0 ? row[cfg.dob] : null
+    const dobRaw = cfg.dob >= 0 ? (rawRows?.[i]?.[cfg.dob] ?? row[cfg.dob]) : null
     const dob = normalizeDob(dobRaw)
     const nExact = normalizeName(fio)
     const nFuzz = normalizeFuzzy(nExact)
@@ -187,27 +212,33 @@ function runDupes(rows: string[][], cfg: ColumnConfig, strictness: Strictness) {
     if (nFuzz && byFuzz.has(nFuzz)) {
       const existingGid = byFuzz.get(nFuzz)!
       if (hasDobConflict(existingGid, nFuzz, dob)) {
-        // БАГ 1+2 FIX: это тёзка с другой ДР
-        // Проверяем, нет ли уже группы для этой тёзки (nFuzz + ":" + dob)
-        const namesakeKey = nFuzz + ":" + (dob ?? "__nodob__")
-        if (byFuzz.has(namesakeKey)) {
-          // уже есть группа для этой конкретной тёзки — просто добавляем туда
-          gid = byFuzz.get(namesakeKey)!
-          type = "одинаковое ФИО"
+        if (hasPhoneMatch(existingGid, nFuzz, ph)) {
+          gid = existingGid
+          type = "одинаковое ФИО (ДР отличается, телефон совпал)"
         } else {
-          // новая тёзка — создаём новую группу
-          isNamesakeConflict = true
-          conflictWithGid = existingGid
-          gid = groups.length
-          groups.push([])
-          groupFioDobs.push(new Map())
-          // регистрируем под составным ключом, чтобы не вытеснить исходный
-          byFuzz.set(namesakeKey, gid)
-          if (nCanon) {
-            const namesakeCanonKey = nCanon + ":" + (dob ?? "__nodob__")
-            if (!byCanon.has(namesakeCanonKey)) byCanon.set(namesakeCanonKey, gid)
+          // БАГ 1+2 FIX: это тёзка с другой ДР
+          // Проверяем, нет ли уже группы для этой тёзки (nFuzz + ":" + dob)
+          const namesakeKey = nFuzz + ":" + (dob ?? "__nodob__")
+          if (byFuzz.has(namesakeKey)) {
+            // уже есть группа для этой конкретной тёзки — просто добавляем туда
+            gid = byFuzz.get(namesakeKey)!
+            type = "одинаковое ФИО"
+          } else {
+            // новая тёзка — создаём новую группу
+            isNamesakeConflict = true
+            conflictWithGid = existingGid
+            gid = groups.length
+            groups.push([])
+            groupFioDobs.push(new Map())
+            groupFioPhones.push(new Map())
+            // регистрируем под составным ключом, чтобы не вытеснить исходный
+            byFuzz.set(namesakeKey, gid)
+            if (nCanon) {
+              const namesakeCanonKey = nCanon + ":" + (dob ?? "__nodob__")
+              if (!byCanon.has(namesakeCanonKey)) byCanon.set(namesakeCanonKey, gid)
+            }
+            type = ""
           }
-          type = "одинаковое ФИО"
         }
       } else {
         gid = existingGid
@@ -215,45 +246,83 @@ function runDupes(rows: string[][], cfg: ColumnConfig, strictness: Strictness) {
       }
     } else if (nCanon && byCanon.has(nCanon)) {
       const existingGid = byCanon.get(nCanon)!
-      if (hasDobConflict(existingGid, nFuzz, dob)) {
-        const namesakeKey = nFuzz + ":" + (dob ?? "__nodob__")
-        if (byFuzz.has(namesakeKey)) {
-          gid = byFuzz.get(namesakeKey)!
-          type = "ФИО, другой порядок слов"
+      const existingFioKey = matchingFioKey(existingGid, nFuzz, nCanon)
+      if (hasDobConflict(existingGid, existingFioKey, dob)) {
+        if (hasPhoneMatch(existingGid, existingFioKey, ph)) {
+          gid = existingGid
+          type = "одинаковое ФИО (ДР отличается, телефон совпал)"
         } else {
-          isNamesakeConflict = true
-          conflictWithGid = existingGid
-          gid = groups.length
-          groups.push([])
-          groupFioDobs.push(new Map())
-          if (nFuzz) byFuzz.set(namesakeKey, gid)
-          const namesakeCanonKey = nCanon + ":" + (dob ?? "__nodob__")
-          if (!byCanon.has(namesakeCanonKey)) byCanon.set(namesakeCanonKey, gid)
-          type = "ФИО, другой порядок слов"
+          const namesakeKey = nFuzz + ":" + (dob ?? "__nodob__")
+          if (byFuzz.has(namesakeKey)) {
+            gid = byFuzz.get(namesakeKey)!
+            type = "ФИО, другой порядок слов"
+          } else {
+            isNamesakeConflict = true
+            conflictWithGid = existingGid
+            gid = groups.length
+            groups.push([])
+            groupFioDobs.push(new Map())
+            groupFioPhones.push(new Map())
+            if (nFuzz) byFuzz.set(namesakeKey, gid)
+            const namesakeCanonKey = nCanon + ":" + (dob ?? "__nodob__")
+            if (!byCanon.has(namesakeCanonKey)) byCanon.set(namesakeCanonKey, gid)
+            type = ""
+          }
         }
       } else {
         gid = existingGid
         type = "ФИО, другой порядок слов"
       }
     } else if (ph && byPhone.has(ph)) {
-      gid = byPhone.get(ph)!
-      type = "совпал телефон"
+      const phoneGid = byPhone.get(ph)!
+      const fioMatch = nFuzz ? matchRecord(idx, fio, null, dob, th) : null
+      if (fioMatch?.status === "disputed" && fioMatch.matchedName && byFuzz.has(fioMatch.matchedName)) {
+        const existingGid = byFuzz.get(fioMatch.matchedName)!
+        if (hasPhoneMatch(existingGid, fioMatch.matchedName, ph)) {
+          gid = existingGid
+          type = "одинаковое ФИО (ДР отличается, телефон совпал)"
+        } else {
+          const namesakeKey = nFuzz + ":" + (dob ?? "__nodob__")
+          if (byFuzz.has(namesakeKey)) {
+            gid = byFuzz.get(namesakeKey)!
+            type = "ФИО с опечаткой"
+          } else {
+            isNamesakeConflict = true
+            conflictWithGid = existingGid
+            gid = groups.length
+            groups.push([])
+            groupFioDobs.push(new Map())
+            groupFioPhones.push(new Map())
+            byFuzz.set(namesakeKey, gid)
+            type = ""
+          }
+        }
+      } else {
+        gid = phoneGid
+        type = "совпал телефон"
+      }
     } else if (nFuzz) {
-      const res = matchRecord(idx, fio, null, dobRaw, th)
+      const res = matchRecord(idx, fio, null, dob, th)
       if (res.status === "disputed" && res.matchedName && byFuzz.has(res.matchedName)) {
         const existingGid = byFuzz.get(res.matchedName)!
-        const namesakeKey = nFuzz + ":" + (dob ?? "__nodob__")
-        if (byFuzz.has(namesakeKey)) {
-          gid = byFuzz.get(namesakeKey)!
-          type = DUP_NAMESAKE_TYPE
+        if (hasPhoneMatch(existingGid, res.matchedName, ph)) {
+          gid = existingGid
+          type = "одинаковое ФИО (ДР отличается, телефон совпал)"
         } else {
-          isNamesakeConflict = true
-          conflictWithGid = existingGid
-          gid = groups.length
-          groups.push([])
-          groupFioDobs.push(new Map())
-          byFuzz.set(namesakeKey, gid)
-          type = DUP_NAMESAKE_TYPE
+          const namesakeKey = nFuzz + ":" + (dob ?? "__nodob__")
+          if (byFuzz.has(namesakeKey)) {
+            gid = byFuzz.get(namesakeKey)!
+            type = "ФИО с опечаткой"
+          } else {
+            isNamesakeConflict = true
+            conflictWithGid = existingGid
+            gid = groups.length
+            groups.push([])
+            groupFioDobs.push(new Map())
+            groupFioPhones.push(new Map())
+            byFuzz.set(namesakeKey, gid)
+            type = ""
+          }
         }
       } else if (res.status === "typo" && res.matchedName && byFuzz.has(res.matchedName)) {
         gid = byFuzz.get(res.matchedName)!
@@ -265,6 +334,7 @@ function runDupes(rows: string[][], cfg: ColumnConfig, strictness: Strictness) {
       gid = groups.length
       groups.push([])
       groupFioDobs.push(new Map())
+      groupFioPhones.push(new Map())
       type = ""
     }
 
@@ -280,7 +350,7 @@ function runDupes(rows: string[][], cfg: ColumnConfig, strictness: Strictness) {
       }
     }
 
-    addToIndex(idx, fio, null, dobRaw)
+    addToIndex(idx, fio, null, dob)
 
     if (i % 300 === 0) {
       post({ kind: "progress", pct: Math.round((95 * (i - cfg.start + 1)) / totalRows), text: `Ищу дубли… ${(i - cfg.start + 1).toLocaleString("ru-RU")} из ${totalRows.toLocaleString("ru-RU")}` })
@@ -306,7 +376,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
   try {
     const msg = e.data
     if (msg.kind === "compare") runCompare(msg.rows1, msg.cfg1, msg.rows2, msg.cfg2, msg.strictness)
-    else if (msg.kind === "dupes") runDupes(msg.rows1, msg.cfg1, msg.strictness)
+    else if (msg.kind === "dupes") runDupes(msg.rows1, msg.rawRows1, msg.cfg1, msg.strictness)
   } catch (err) {
     post({ kind: "error", message: err instanceof Error ? err.message : String(err) })
   }

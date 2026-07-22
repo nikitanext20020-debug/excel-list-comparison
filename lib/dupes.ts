@@ -1,6 +1,26 @@
 /** Тип строки, которую нельзя автоматически считать дублем: совпало ФИО,
  * но заполненные даты рождения у записей различаются. */
 export const DUP_NAMESAKE_TYPE = "тёзка? (другая дата рождения)"
+export const DUP_MANUAL_NAMESAKE_TYPE = "одинаковое ФИО (ДР отличается, подтверждено вручную)"
+
+export type DupNamesakeDecision = "yes" | "no"
+
+type RowWithType = { excelRow: number; type: string }
+
+export function namesakePairKey(pair: { excelRow: number }[]): string {
+  return `${pair[0]?.excelRow ?? 0}:${pair[1]?.excelRow ?? 0}`
+}
+
+export function manualDuplicateRows(
+  disputed: { excelRow: number }[][],
+  decisions: Record<string, DupNamesakeDecision>,
+): Set<number> {
+  const rows = new Set<number>()
+  for (const pair of disputed) {
+    if (decisions[namesakePairKey(pair)] === "yes" && pair[1]) rows.add(pair[1].excelRow)
+  }
+  return rows
+}
 
 export function isDisputedNamesake(type: string): boolean {
   return type === DUP_NAMESAKE_TYPE
@@ -15,18 +35,28 @@ export function filterAutoDuplicateMembers<T extends { type: string }>(members: 
  * Считает количество строк, которые будут удалены из файла без дублей.
  * Та же логика, что в buildCleanFile — вынесена для синхронизации с UI.
  */
-export function countWillDelete<T extends { type: string }>(
+export function rowsWillDelete<T extends RowWithType>(
   groups: T[][],
   delPhone: boolean,
-): number {
-  let count = 0
+  manualRows: Iterable<number> = [],
+): Set<number> {
+  const rows = new Set<number>()
   for (const grp of groups) {
     const autoMembers = filterAutoDuplicateMembers(grp)
     for (let i = 1; i < autoMembers.length; i++) {
       const m = autoMembers[i]
       if (!delPhone && m.type === "совпал телефон") continue
-      count++
+      rows.add(m.excelRow)
     }
   }
-  return count
+  for (const row of manualRows) rows.add(row)
+  return rows
+}
+
+export function countWillDelete<T extends RowWithType>(
+  groups: T[][],
+  delPhone: boolean,
+  manualRows: Iterable<number> = [],
+): number {
+  return rowsWillDelete(groups, delPhone, manualRows).size
 }
