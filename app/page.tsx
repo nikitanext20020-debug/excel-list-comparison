@@ -10,7 +10,7 @@ import { AiAssistant } from "@/components/ai-assistant"
 import { SwapFilesButton } from "@/components/swap-files-button"
 import type { LoadedFile } from "@/lib/xlsx-io"
 import { buildColored, buildExport, buildDupesFile, buildCleanFile, buildPhoneReportFile, buildPhoneCleanFile, downloadBlob } from "@/lib/xlsx-io"
-import { namesakePairKey, type DupNamesakeDecision } from "@/lib/dupes"
+import { type DupAiResult, type DupNamesakeDecision } from "@/lib/dupes"
 import type { Strictness } from "@/lib/matching"
 import type { RowResult, DupMember, WorkerResponse, WorkerRequest, ColumnConfig } from "@/workers/match.worker"
 
@@ -93,11 +93,30 @@ export default function Page() {
   const [compareRes, setCompareRes] = useState<{ results: RowResult[]; dbCount: number } | null>(null)
   const [dupes, setDupes] = useState<{ groups: DupMember[][]; disputed: DupMember[][]; phoneGroups: DupMember[][]; total: number } | null>(null)
   const [decisions, setDecisions] = useState<Record<number, Decision>>({})
-  const [dupDecisions, setDupDecisions] = useState<Record<string, DupNamesakeDecision>>({})
+  const [dupDecisions, setDupDecisions] = useState<Record<number, DupNamesakeDecision>>({})
+  const [dupAiVerdicts, setDupAiVerdicts] = useState<Record<number, DupAiResult>>({})
+  const [dupAiEnabled, setDupAiEnabled] = useState(false)
+  const [dupAiRunning, setDupAiRunning] = useState(false)
+  const [dupAiProgress, setDupAiProgress] = useState<{ done: number; total: number } | null>(null)
+  const [dupAiError, setDupAiError] = useState<string | null>(null)
   const [downloadNote, setDownloadNote] = useState<string | null>(null)
 
   const workerRef = useRef<Worker | null>(null)
   useEffect(() => () => workerRef.current?.terminate(), [])
+  useEffect(() => {
+    let active = true
+    fetch("/api/judge-pairs")
+      .then((res) => (res.ok ? res.json() : { enabled: false }))
+      .then((data: { enabled?: boolean }) => {
+        if (active) setDupAiEnabled(data.enabled === true)
+      })
+      .catch(() => {
+        if (active) setDupAiEnabled(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const needB = mode !== "dupes"
   const ready = !!fileA && (!needB || !!fileB) && !running
@@ -110,6 +129,9 @@ export default function Page() {
     setDupes(null)
     setDecisions({})
     setDupDecisions({})
+    setDupAiVerdicts({})
+    setDupAiProgress(null)
+    setDupAiError(null)
     setProgress(null)
     setDownloadNote(null)
     setError(null)
@@ -121,6 +143,9 @@ export default function Page() {
     setDupes(null)
     setDecisions({})
     setDupDecisions({})
+    setDupAiVerdicts({})
+    setDupAiProgress(null)
+    setDupAiError(null)
     setDownloadNote(null)
 
     const err = validateCfg(fileA, "Файл 1") || (needB ? validateCfg(fileB, "Файл 2") : null)
@@ -172,6 +197,101 @@ export default function Page() {
     })
   }
 
+  type JudgeSourceRow = {
+    excelRow: number
+    columns: { header: string; value: string }[]
+  }
+
+  type JudgePairPayload = {
+    index: number
+    left: JudgeSourceRow
+    right: JudgeSourceRow
+    matchReason: string
+  }
+
+  function buildJudgePairs(indices: number[]): JudgePairPayload[] {
+    if (!fileA || !dupes) return []
+    const headerRow = fileA.rows[fileA.cfg.start - 2] || []
+    const maxCols = Math.max(headerRow.length, ...fileA.rows.map((row) => row.length), 1)
+    const headers = Array.from({ length: maxCols }, (_, col) => String(headerRow[col] || "").trim() || `Колонка ${col + 1}`)
+    const sourceRow = (excelRow: number): JudgeSourceRow => {
+      const row = fileA.rows[excelRow - 1] || []
+      return {
+        excelRow,
+        columns: headers.map((header, col) => ({ header, value: String(row[col] ?? "") })),
+      }
+    }
+    return indices
+      .map((index) => {
+        const pair = dupes.disputed[index]
+        if (!pair?.[0] || !pair[1]) return null
+        return {
+          index,
+          left: sourceRow(pair[0].excelRow),
+          right: sourceRow(pair[1].excelRow),
+          matchReason: `${pair[0].type}; ${pair[1].type}`,
+        }
+      })
+      .filter((pair): pair is JudgePairPayload => pair !== null)
+  }
+
+  async function judgePairIndices(indices: number[]) {
+    if (!dupAiEnabled || dupAiRunning || !fileA || !dupes) return
+    const target = [...new Set(indices)].filter((index) => !!dupes.disputed[index])
+    if (!target.length) return
+    setDupAiRunning(true)
+    setDupAiError(null)
+    setDupAiProgress({ done: 0, total: target.length })
+    const failures: number[] = []
+    try {
+      for (let start = 0; start < target.length; start += 15) {
+        const batchIndices = target.slice(start, start + 15)
+        const pairs = buildJudgePairs(batchIndices)
+        try {
+          const response = await fetch("/api/judge-pairs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pairs }),
+          })
+          if (!response.ok) throw new Error(`Сервис ИИ ответил (${response.status})`)
+          const data = (await response.json()) as { results?: (DupAiResult & { index: number })[] }
+          const results = data.results
+          if (!Array.isArray(results)) throw new Error("Некорректный ответ сервиса ИИ")
+          const returnedIndices = new Set(results.map((result) => result.index))
+          const missingIndices = batchIndices.filter((index) => !returnedIndices.has(index))
+          if (missingIndices.length) failures.push(...missingIndices)
+          setDupAiVerdicts((previous) => {
+            const next = { ...previous }
+            for (const result of results) {
+              if (batchIndices.includes(result.index)) next[result.index] = result
+            }
+            return next
+          })
+        } catch (error) {
+          failures.push(...batchIndices)
+          console.error("[judge-pairs] batch failed:", error)
+        }
+        setDupAiProgress({ done: Math.min(start + batchIndices.length, target.length), total: target.length })
+      }
+      if (failures.length) {
+        setDupAiError(`Не удалось проверить ${failures.length} ${failures.length === 1 ? "пару" : "пар"}. Их можно проверить повторно.`)
+      }
+    } finally {
+      setDupAiRunning(false)
+    }
+  }
+
+  function acceptConfidentAiVerdicts() {
+    setDupDecisions((previous) => {
+      const next = { ...previous }
+      for (const [index, result] of Object.entries(dupAiVerdicts)) {
+        if (result.confidence >= 90 && result.verdict === "same") next[Number(index)] = "yes"
+        if (result.confidence >= 90 && result.verdict === "different") next[Number(index)] = "no"
+      }
+      return next
+    })
+  }
+
   function downloadResult() {
     if (!fileA || !compareRes) return
     const base = fileA.name.replace(/\.[^.]+$/, "")
@@ -191,16 +311,19 @@ export default function Page() {
   function downloadDupesReport() {
     if (!fileA || !dupes) return
     const base = fileA.name.replace(/\.[^.]+$/, "")
-    const samePairs = dupes.disputed.filter((pair) => dupDecisions[namesakePairKey(pair)] === "yes")
-    const unresolvedPairs = dupes.disputed.filter((pair) => !dupDecisions[namesakePairKey(pair)])
-    downloadBlob(buildDupesFile(dupes.groups, unresolvedPairs, samePairs), base + "_ДУБЛИ.xlsx")
+    const samePairs = dupes.disputed.filter((_, index) => dupDecisions[index] === "yes")
+    downloadBlob(buildDupesFile(dupes.groups, dupes.disputed, {
+      manualSamePairs: samePairs,
+      aiVerdicts: dupAiVerdicts,
+      decisions: dupDecisions,
+    }), base + "_ДУБЛИ.xlsx")
     setDownloadNote("Отчёт по дублям скачан.")
   }
 
   function downloadClean() {
     if (!fileA || !dupes) return
     const base = fileA.name.replace(/\.[^.]+$/, "")
-    const samePairs = dupes.disputed.filter((pair) => dupDecisions[namesakePairKey(pair)] === "yes")
+    const samePairs = dupes.disputed.filter((_, index) => dupDecisions[index] === "yes")
     const out = buildCleanFile(fileA, dupes.groups, { withLog: dupWithLog, delPhone: dupDelPhone, manualSamePairs: samePairs })
     if (!out) {
       setDownloadNote("Нечего удалять: все группы — совпадения только по телефону. Включите вторую галочку, если их тоже нужно удалить.")
@@ -233,7 +356,7 @@ export default function Page() {
     ? compareRes.results.filter((r) => r.res.status === "disputed" && !decisions[r.excelRow]).length
     : 0
   const acceptedDupNamesakes = dupes
-    ? dupes.disputed.filter((pair) => dupDecisions[namesakePairKey(pair)] === "yes").length
+    ? dupes.disputed.filter((_, index) => dupDecisions[index] === "yes").length
     : 0
 
   return (
@@ -338,6 +461,9 @@ export default function Page() {
                   setDupes(null)
                   setDecisions({})
                   setDupDecisions({})
+                  setDupAiVerdicts({})
+                  setDupAiProgress(null)
+                  setDupAiError(null)
                   setProgress(null)
                   setDownloadNote(null)
                   setError(null)
@@ -547,11 +673,19 @@ export default function Page() {
                 total={dupes.total}
                 dupDelPhone={dupDelPhone}
                 decisions={dupDecisions}
-                onDecide={(pairKey, decision) =>
+                aiVerdicts={dupAiVerdicts}
+                aiEnabled={dupAiEnabled}
+                aiRunning={dupAiRunning}
+                aiProgress={dupAiProgress}
+                aiError={dupAiError}
+                onJudgeAll={() => judgePairIndices(dupes.disputed.map((_, index) => index))}
+                onJudgePair={(pairIndex) => judgePairIndices([pairIndex])}
+                onAcceptConfident={acceptConfidentAiVerdicts}
+                onDecide={(pairIndex, decision) =>
                   setDupDecisions((prev) => {
                     const next = { ...prev }
-                    if (decision) next[pairKey] = decision
-                    else delete next[pairKey]
+                    if (decision) next[pairIndex] = decision
+                    else delete next[pairIndex]
                     return next
                   })
                 }

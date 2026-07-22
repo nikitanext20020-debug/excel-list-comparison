@@ -1,9 +1,17 @@
 /** Тип строки, которую нельзя автоматически считать дублем: совпало ФИО,
  * но заполненные даты рождения у записей различаются. */
 export const DUP_NAMESAKE_TYPE = "тёзка? (другая дата рождения)"
-export const DUP_MANUAL_NAMESAKE_TYPE = "одинаковое ФИО (ДР отличается, подтверждено вручную)"
+export const DUP_MANUAL_NAMESAKE_TYPE = "одинаковое ФИО (ДР отличается, подтверждено вручную/ИИ)"
 
 export type DupNamesakeDecision = "yes" | "no"
+
+export type DupAiVerdict = "same" | "different" | "unsure"
+
+export interface DupAiResult {
+  verdict: DupAiVerdict
+  confidence: number
+  reason: string
+}
 
 type RowWithType = { excelRow: number; type: string }
 
@@ -13,11 +21,11 @@ export function namesakePairKey(pair: { excelRow: number }[]): string {
 
 export function manualDuplicateRows(
   disputed: { excelRow: number }[][],
-  decisions: Record<string, DupNamesakeDecision>,
+  decisions: Record<number, DupNamesakeDecision>,
 ): Set<number> {
   const rows = new Set<number>()
-  for (const pair of disputed) {
-    if (decisions[namesakePairKey(pair)] === "yes" && pair[1]) rows.add(pair[1].excelRow)
+  for (const [pairIndex, pair] of disputed.entries()) {
+    if (decisions[pairIndex] === "yes" && pair[1]) rows.add(pair[1].excelRow)
   }
   return rows
 }

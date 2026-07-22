@@ -4,7 +4,13 @@
 import * as XLSX from "xlsx-js-style"
 import { STATUS_LABEL, MATCHED_STATUSES, normalizePhone, type MatchStatus } from "@/lib/matching"
 import type { ColumnConfig, RowResult, DupMember } from "@/workers/match.worker"
-import { DUP_MANUAL_NAMESAKE_TYPE, filterAutoDuplicateMembers, isDisputedNamesake } from "@/lib/dupes"
+import {
+  DUP_MANUAL_NAMESAKE_TYPE,
+  filterAutoDuplicateMembers,
+  isDisputedNamesake,
+  type DupAiResult,
+  type DupNamesakeDecision,
+} from "@/lib/dupes"
 
 export interface LoadedFile {
   name: string
@@ -219,10 +225,16 @@ export function buildExport(
 }
 
 /* Отчёт по дублям */
+export interface DupesReportOptions {
+  manualSamePairs?: DupMember[][]
+  aiVerdicts?: Record<number, DupAiResult>
+  decisions?: Record<number, DupNamesakeDecision>
+}
+
 export function buildDupesFile(
   groups: DupMember[][],
   disputed: DupMember[][] = [],
-  manualSamePairs: DupMember[][] = [],
+  options: DupesReportOptions = {},
 ): Blob {
   const headers = ["Группа", "Строка в файле", "ФИО", "Телефон", "Совпадение"]
   const aoa: (string | number)[][] = [headers]
@@ -244,7 +256,7 @@ export function buildDupesFile(
     }
     g++
   }
-  for (const pair of manualSamePairs) {
+  for (const pair of options.manualSamePairs ?? []) {
     if (!pair[0] || !pair[1]) continue
     const manualGroup = [
       { ...pair[0], type: "первое упоминание" },
@@ -282,10 +294,32 @@ export function buildDupesFile(
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, "Дубли")
   if (disputedRows.length) {
-    const disputedAoa: (string | number)[][] = [["Строка в файле", "ФИО", "Телефон", "Совпадение"]]
-    for (const m of disputedRows) disputedAoa.push([m.excelRow, m.fio || "", m.phone || "", m.type])
+    const disputedHeaders = [
+      "Строка в файле",
+      "ФИО",
+      "Телефон",
+      "Совпадение",
+      "Вердикт ИИ",
+      "Уверенность",
+      "Обоснование",
+      "Решение пользователя",
+    ]
+    const disputedAoa: (string | number)[][] = [disputedHeaders]
+    for (const [pairIndex, pair] of disputed.entries()) {
+      const ai = options.aiVerdicts?.[pairIndex]
+      const aiLabel = ai?.verdict === "same" ? "Один человек" : ai?.verdict === "different" ? "Разные люди" : ai?.verdict === "unsure" ? "Не уверен" : ""
+      const decisionLabel = options.decisions?.[pairIndex] === "yes" ? "один человек" : options.decisions?.[pairIndex] === "no" ? "разные люди" : ""
+      for (const member of pair) {
+        disputedAoa.push([member.excelRow, member.fio || "", member.phone || "", member.type, aiLabel, ai?.confidence ?? "", ai?.reason || "", decisionLabel])
+      }
+    }
+    const reportedRows = new Set(disputed.flat().map((member) => member.excelRow))
+    for (const member of disputedRows) {
+      if (reportedRows.has(member.excelRow)) continue
+      disputedAoa.push([member.excelRow, member.fio || "", member.phone || "", member.type, "", "", "", ""])
+    }
     const disputedWs = XLSX.utils.aoa_to_sheet(disputedAoa)
-    for (let c = 0; c < disputedAoa[0].length; c++) {
+    for (let c = 0; c < disputedHeaders.length; c++) {
       const addr = XLSX.utils.encode_cell({ r: 0, c })
       if (disputedWs[addr]) (disputedWs[addr] as { s?: object }).s = { font: { bold: true } }
     }
