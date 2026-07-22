@@ -1,20 +1,37 @@
 "use client"
 
 import type { DupMember } from "@/workers/match.worker"
-import { filterAutoDuplicateMembers, countWillDelete } from "@/lib/dupes"
+import {
+  DUP_MANUAL_NAMESAKE_TYPE,
+  filterAutoDuplicateMembers,
+  countWillDelete,
+  manualDuplicateRows,
+  namesakePairKey,
+  type DupNamesakeDecision,
+} from "@/lib/dupes"
 
 interface DupesPanelProps {
   groups: DupMember[][]
   disputed?: DupMember[][]
   total: number
   dupDelPhone: boolean
+  decisions: Record<string, DupNamesakeDecision>
+  onDecide: (pairKey: string, decision: DupNamesakeDecision | null) => void
 }
 
-export function DupesPanel({ groups, disputed = [], total, dupDelPhone }: DupesPanelProps) {
+export function DupesPanel({ groups, disputed = [], total, dupDelPhone, decisions, onDecide }: DupesPanelProps) {
+  const manualRows = manualDuplicateRows(disputed, decisions)
   // строк в дублях = все участники групп без первых упоминаний
-  const dupRows = groups.reduce((s, g) => s + Math.max(filterAutoDuplicateMembers(g).length - 1, 0), 0)
+  const duplicateRows = new Set<number>()
+  for (const group of groups) {
+    for (const member of filterAutoDuplicateMembers(group).slice(1)) duplicateRows.add(member.excelRow)
+  }
+  for (const row of manualRows) duplicateRows.add(row)
+  const dupRows = duplicateRows.size
   // будет удалено = та же логика что в buildCleanFile
-  const willDelete = countWillDelete(groups, dupDelPhone)
+  const willDelete = countWillDelete(groups, dupDelPhone, manualRows)
+  const visibleDisputed = disputed.filter((pair) => decisions[namesakePairKey(pair)] !== "no")
+  const hiddenDifferent = disputed.length - visibleDisputed.length
 
   return (
     <div className="flex flex-col gap-4">
@@ -75,40 +92,88 @@ export function DupesPanel({ groups, disputed = [], total, dupDelPhone }: DupesP
         </div>
       )}
 
-      {disputed.length > 0 && (
+      {(visibleDisputed.length > 0 || hiddenDifferent > 0) && (
         <div className="overflow-x-auto rounded-lg border border-accent/40 bg-accent/5">
-          <div className="border-b border-accent/30 px-3 py-2 text-sm font-semibold text-accent-foreground">
-            Спорные тёзки — ручная проверка ({disputed.length} пар)
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-accent/30 px-3 py-2">
+            <span className="text-sm font-semibold text-accent-foreground">
+              Спорные тёзки — ручная проверка ({visibleDisputed.length} пар)
+            </span>
+            {hiddenDifferent > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  for (const pair of disputed) {
+                    const key = namesakePairKey(pair)
+                    if (decisions[key] === "no") onDecide(key, null)
+                  }
+                }}
+                className="rounded-md border border-input bg-card px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Вернуть скрытые пары ({hiddenDifferent})
+              </button>
+            )}
           </div>
-          <table className="w-full border-collapse text-sm">
-            <caption className="sr-only">Спорные тёзки с разными датами рождения</caption>
-            <thead>
-              <tr className="border-b border-accent/20 bg-muted/50">
-                {["Конфликт", "Строка", "ФИО", "Телефон", "Совпадение"].map((h) => (
-                  <th key={h} className="px-3 py-2 text-left font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {disputed.slice(0, 50).map((pair, pi) =>
-                pair.map((m, mi) => (
-                  <tr
-                    key={`${pi}-${m.excelRow}`}
-                    className={`border-b border-accent/10 last:border-0 ${mi === 0 ? "border-t border-accent/30" : ""}`}
-                  >
-                    <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{mi === 0 ? `#${pi + 1}` : ""}</td>
-                    <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{m.excelRow}</td>
-                    <td className="px-3 py-1.5">{m.fio || "—"}</td>
-                    <td className="px-3 py-1.5 font-mono text-xs">{m.phone || ""}</td>
-                    <td className="px-3 py-1.5 text-xs font-medium text-accent-foreground">{m.type}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-          {disputed.length > 50 && <p className="border-t border-accent/20 px-3 py-2 text-xs text-muted-foreground">Показаны первые 50 пар — полный список будет в отчёте.</p>}
+          {visibleDisputed.length > 0 && (
+            <table className="w-full border-collapse text-sm">
+              <caption className="sr-only">Спорные тёзки с разными датами рождения</caption>
+              <thead>
+                <tr className="border-b border-accent/20 bg-muted/50">
+                  {["Конфликт", "Строка", "ФИО", "Телефон", "Совпадение", "Решение"].map((h) => (
+                    <th key={h} className="px-3 py-2 text-left font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleDisputed.slice(0, 50).map((pair, pi) => {
+                  const pairKey = namesakePairKey(pair)
+                  const decision = decisions[pairKey]
+                  return pair.map((m, mi) => (
+                    <tr
+                      key={`${pairKey}-${m.excelRow}`}
+                      className={`border-b border-accent/10 last:border-0 ${mi === 0 ? "border-t border-accent/30" : ""}`}
+                    >
+                      <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{mi === 0 ? `#${pi + 1}` : ""}</td>
+                      <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{m.excelRow}</td>
+                      <td className="px-3 py-1.5">{m.fio || "—"}</td>
+                      <td className="px-3 py-1.5 font-mono text-xs">{m.phone || ""}</td>
+                      <td className="px-3 py-1.5 text-xs font-medium text-accent-foreground">
+                        {mi === 1 && decision === "yes" ? DUP_MANUAL_NAMESAKE_TYPE : m.type}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        {mi === 1 && (
+                          <div className="flex shrink-0 gap-1.5" role="group" aria-label={`Решение для строк ${pair[0]?.excelRow} и ${pair[1]?.excelRow}`}>
+                            <button
+                              type="button"
+                              onClick={() => onDecide(pairKey, decision === "yes" ? null : "yes")}
+                              aria-pressed={decision === "yes"}
+                              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                                decision === "yes"
+                                  ? "border-primary bg-primary text-primary-foreground"
+                                  : "border-input bg-card text-foreground hover:border-primary/60"
+                              }`}
+                            >
+                              Один человек
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onDecide(pairKey, "no")}
+                              aria-pressed={false}
+                              className="rounded-md border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-destructive/60"
+                            >
+                              Разные люди
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                })}
+              </tbody>
+            </table>
+          )}
+          {visibleDisputed.length > 50 && <p className="border-t border-accent/20 px-3 py-2 text-xs text-muted-foreground">Показаны первые 50 пар — полный список будет в отчёте.</p>}
         </div>
       )}
     </div>

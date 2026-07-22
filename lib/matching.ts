@@ -77,6 +77,31 @@ export function canonicalKey(name: string | null): string | null {
 
 /* Дата рождения -> "гггг-мм-дд" или null */
 export function normalizeDob(v: unknown): string | null {
+  // Настоящие date-ячейки Excel при чтении с cellDates: true приходят как Date.
+  // SheetJS создаёт их в локальном часовом поясе, поэтому используем local getters:
+  // UTC-геттеры в часовых поясах восточнее UTC могут вернуть предыдущий день.
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    const y = v.getFullYear()
+    const mo = v.getMonth() + 1
+    const d = v.getDate()
+    if (y > 1900 && y < 2100) {
+      return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+    }
+    return null
+  }
+
+  // Числовая date-ячейка без date-типа — серийный номер Excel.
+  if (typeof v === "number" && Number.isFinite(v) && v > 0 && v < 100000) {
+    const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(v) * 86400000)
+    const y = date.getUTCFullYear()
+    const mo = date.getUTCMonth() + 1
+    const d = date.getUTCDate()
+    if (y > 1900 && y < 2100) {
+      return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+    }
+    return null
+  }
+
   const s = normStr(v)
   if (!s || s.toLowerCase() === "nan") return null
   // дд.мм.гггг / дд/мм/гг / дд-мм-гггг

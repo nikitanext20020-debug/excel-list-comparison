@@ -4,7 +4,7 @@
 import * as XLSX from "xlsx-js-style"
 import { STATUS_LABEL, MATCHED_STATUSES, normalizePhone, type MatchStatus } from "@/lib/matching"
 import type { ColumnConfig, RowResult, DupMember } from "@/workers/match.worker"
-import { filterAutoDuplicateMembers, isDisputedNamesake } from "@/lib/dupes"
+import { DUP_MANUAL_NAMESAKE_TYPE, filterAutoDuplicateMembers, isDisputedNamesake } from "@/lib/dupes"
 
 export interface LoadedFile {
   name: string
@@ -12,6 +12,7 @@ export interface LoadedFile {
   sheetNames: string[]
   sheet: string
   rows: string[][]
+  rawRows: unknown[][]
   cfg: ColumnConfig
 }
 
@@ -33,6 +34,19 @@ export function sheetRows(wb: XLSX.WorkBook, sheetName: string): string[][] {
   const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "", blankrows: true }) as string[][]
   const colPad = new Array(range.s.c).fill("")
   const rows: string[][] = []
+  for (let i = 0; i < range.s.r; i++) rows.push([])
+  for (const r of raw) rows.push(colPad.concat(r))
+  return rows
+}
+
+/** Исходные значения ячеек для точной обработки дат в режиме поиска дублей. */
+export function sheetRawRows(wb: XLSX.WorkBook, sheetName: string): unknown[][] {
+  const ws = wb.Sheets[sheetName]
+  if (!ws || !ws["!ref"]) return []
+  const range = XLSX.utils.decode_range(ws["!ref"] as string)
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "", blankrows: true }) as unknown[][]
+  const colPad = new Array(range.s.c).fill("")
+  const rows: unknown[][] = []
   for (let i = 0; i < range.s.r; i++) rows.push([])
   for (const r of raw) rows.push(colPad.concat(r))
   return rows
@@ -72,16 +86,18 @@ export function guessColumns(rows: string[][]): ColumnConfig {
 
 export async function loadExcelFile(file: File): Promise<LoadedFile> {
   const buf = await file.arrayBuffer()
-  const wb = XLSX.read(buf, { type: "array" })
+  const wb = XLSX.read(buf, { type: "array", cellDates: true })
   const sheet = wb.SheetNames[0]
   const rows = sheetRows(wb, sheet)
-  return { name: file.name, buf, sheetNames: wb.SheetNames, sheet, rows, cfg: guessColumns(rows) }
+  const rawRows = sheetRawRows(wb, sheet)
+  return { name: file.name, buf, sheetNames: wb.SheetNames, sheet, rows, rawRows, cfg: guessColumns(rows) }
 }
 
 export function switchSheet(f: LoadedFile, sheet: string): LoadedFile {
-  const wb = XLSX.read(f.buf, { type: "array" })
+  const wb = XLSX.read(f.buf, { type: "array", cellDates: true })
   const rows = sheetRows(wb, sheet)
-  return { ...f, sheet, rows, cfg: guessColumns(rows) }
+  const rawRows = sheetRawRows(wb, sheet)
+  return { ...f, sheet, rows, rawRows, cfg: guessColumns(rows) }
 }
 
 /* ================= Сборка результатов ================= */
@@ -203,7 +219,11 @@ export function buildExport(
 }
 
 /* Отчёт по дублям */
-export function buildDupesFile(groups: DupMember[][], disputed: DupMember[][] = []): Blob {
+export function buildDupesFile(
+  groups: DupMember[][],
+  disputed: DupMember[][] = [],
+  manualSamePairs: DupMember[][] = [],
+): Blob {
   const headers = ["Группа", "Строка в файле", "ФИО", "Телефон", "Совпадение"]
   const aoa: (string | number)[][] = [headers]
   const shade: boolean[] = []
@@ -217,6 +237,21 @@ export function buildDupesFile(groups: DupMember[][], disputed: DupMember[][] = 
     const autoMembers = filterAutoDuplicateMembers(grp)
     let first = true
     for (const m of autoMembers) {
+      aoa.push([g, m.excelRow, m.fio || "", m.phone || "", m.type])
+      shade.push(g % 2 === 0)
+      groupStart.push(first)
+      first = false
+    }
+    g++
+  }
+  for (const pair of manualSamePairs) {
+    if (!pair[0] || !pair[1]) continue
+    const manualGroup = [
+      { ...pair[0], type: "первое упоминание" },
+      { ...pair[1], type: DUP_MANUAL_NAMESAKE_TYPE },
+    ]
+    let first = true
+    for (const m of manualGroup) {
       aoa.push([g, m.excelRow, m.fio || "", m.phone || "", m.type])
       shade.push(g % 2 === 0)
       groupStart.push(first)
@@ -594,7 +629,7 @@ function buildDeletedSheet(
 export function buildCleanFile(
   f: LoadedFile,
   groups: DupMember[][],
-  opts: { withLog: boolean; delPhone: boolean },
+  opts: { withLog: boolean; delPhone: boolean; manualSamePairs?: DupMember[][] },
 ): { blob: Blob; removedCount: number } | null {
   // Строим структуру удаляемых строк + данные для листа «Удалённые»
   const del = new Map<number, { g: number; type: string }>()
@@ -615,6 +650,22 @@ export function buildCleanFile(
     }
     if (opts.withLog) {
       groupsForLog.push({ groupNum: g, kept: keptRow, deleted: deletedRows, type: matchType })
+    }
+    g++
+  }
+  for (const pair of opts.manualSamePairs ?? []) {
+    const kept = pair[0]
+    const duplicate = pair[1]
+    if (!kept || !duplicate) continue
+    const alreadyScheduled = del.has(duplicate.excelRow)
+    del.set(duplicate.excelRow, { g, type: DUP_MANUAL_NAMESAKE_TYPE })
+    if (opts.withLog && !alreadyScheduled) {
+      groupsForLog.push({
+        groupNum: g,
+        kept: kept.excelRow,
+        deleted: [duplicate.excelRow],
+        type: DUP_MANUAL_NAMESAKE_TYPE,
+      })
     }
     g++
   }

@@ -10,6 +10,7 @@ import { AiAssistant } from "@/components/ai-assistant"
 import { SwapFilesButton } from "@/components/swap-files-button"
 import type { LoadedFile } from "@/lib/xlsx-io"
 import { buildColored, buildExport, buildDupesFile, buildCleanFile, buildPhoneReportFile, buildPhoneCleanFile, downloadBlob } from "@/lib/xlsx-io"
+import { namesakePairKey, type DupNamesakeDecision } from "@/lib/dupes"
 import type { Strictness } from "@/lib/matching"
 import type { RowResult, DupMember, WorkerResponse, WorkerRequest, ColumnConfig } from "@/workers/match.worker"
 
@@ -92,6 +93,7 @@ export default function Page() {
   const [compareRes, setCompareRes] = useState<{ results: RowResult[]; dbCount: number } | null>(null)
   const [dupes, setDupes] = useState<{ groups: DupMember[][]; disputed: DupMember[][]; phoneGroups: DupMember[][]; total: number } | null>(null)
   const [decisions, setDecisions] = useState<Record<number, Decision>>({})
+  const [dupDecisions, setDupDecisions] = useState<Record<string, DupNamesakeDecision>>({})
   const [downloadNote, setDownloadNote] = useState<string | null>(null)
 
   const workerRef = useRef<Worker | null>(null)
@@ -107,6 +109,7 @@ export default function Page() {
     setCompareRes(null)
     setDupes(null)
     setDecisions({})
+    setDupDecisions({})
     setProgress(null)
     setDownloadNote(null)
     setError(null)
@@ -117,6 +120,7 @@ export default function Page() {
     setCompareRes(null)
     setDupes(null)
     setDecisions({})
+    setDupDecisions({})
     setDownloadNote(null)
 
     const err = validateCfg(fileA, "Файл 1") || (needB ? validateCfg(fileB, "Файл 2") : null)
@@ -151,7 +155,7 @@ export default function Page() {
 
     const req: WorkerRequest =
       mode === "dupes"
-        ? { kind: "dupes", rows1: fileA!.rows, cfg1: fileA!.cfg as ColumnConfig, strictness }
+        ? { kind: "dupes", rows1: fileA!.rows, rawRows1: fileA!.rawRows, cfg1: fileA!.cfg as ColumnConfig, strictness }
         : { kind: "compare", rows1: fileA!.rows, cfg1: fileA!.cfg, rows2: fileB!.rows, cfg2: fileB!.cfg, strictness }
     worker.postMessage(req)
   }
@@ -187,14 +191,17 @@ export default function Page() {
   function downloadDupesReport() {
     if (!fileA || !dupes) return
     const base = fileA.name.replace(/\.[^.]+$/, "")
-    downloadBlob(buildDupesFile(dupes.groups, dupes.disputed), base + "_ДУБЛИ.xlsx")
+    const samePairs = dupes.disputed.filter((pair) => dupDecisions[namesakePairKey(pair)] === "yes")
+    const unresolvedPairs = dupes.disputed.filter((pair) => !dupDecisions[namesakePairKey(pair)])
+    downloadBlob(buildDupesFile(dupes.groups, unresolvedPairs, samePairs), base + "_ДУБЛИ.xlsx")
     setDownloadNote("Отчёт по дублям скачан.")
   }
 
   function downloadClean() {
     if (!fileA || !dupes) return
     const base = fileA.name.replace(/\.[^.]+$/, "")
-    const out = buildCleanFile(fileA, dupes.groups, { withLog: dupWithLog, delPhone: dupDelPhone })
+    const samePairs = dupes.disputed.filter((pair) => dupDecisions[namesakePairKey(pair)] === "yes")
+    const out = buildCleanFile(fileA, dupes.groups, { withLog: dupWithLog, delPhone: dupDelPhone, manualSamePairs: samePairs })
     if (!out) {
       setDownloadNote("Нечего удалять: все группы — совпадения только по телефону. Включите вторую галочку, если их тоже нужно удалить.")
       return
@@ -224,6 +231,9 @@ export default function Page() {
 
   const disputedLeft = compareRes
     ? compareRes.results.filter((r) => r.res.status === "disputed" && !decisions[r.excelRow]).length
+    : 0
+  const acceptedDupNamesakes = dupes
+    ? dupes.disputed.filter((pair) => dupDecisions[namesakePairKey(pair)] === "yes").length
     : 0
 
   return (
@@ -327,6 +337,7 @@ export default function Page() {
                   setCompareRes(null)
                   setDupes(null)
                   setDecisions({})
+                  setDupDecisions({})
                   setProgress(null)
                   setDownloadNote(null)
                   setError(null)
@@ -530,8 +541,22 @@ export default function Page() {
 
           {dupes && (
             <>
-              <DupesPanel groups={dupes.groups} disputed={dupes.disputed} total={dupes.total} dupDelPhone={dupDelPhone} />
-              {dupes.groups.length > 0 ? (
+              <DupesPanel
+                groups={dupes.groups}
+                disputed={dupes.disputed}
+                total={dupes.total}
+                dupDelPhone={dupDelPhone}
+                decisions={dupDecisions}
+                onDecide={(pairKey, decision) =>
+                  setDupDecisions((prev) => {
+                    const next = { ...prev }
+                    if (decision) next[pairKey] = decision
+                    else delete next[pairKey]
+                    return next
+                  })
+                }
+              />
+              {dupes.groups.length > 0 || acceptedDupNamesakes > 0 ? (
                 <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
