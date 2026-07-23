@@ -3,9 +3,10 @@
 import { Fragment, useState } from "react"
 import type { DupMember } from "@/workers/match.worker"
 import {
-  DUP_MANUAL_NAMESAKE_TYPE,
   filterAutoDuplicateMembers,
   countWillDelete,
+  isAiJudgeablePair,
+  manualConfirmedDuplicateType,
   manualDuplicateRows,
   namesakePairKey,
   type DupAiResult,
@@ -16,6 +17,7 @@ interface DupesPanelProps {
   groups: DupMember[][]
   disputed?: DupMember[][]
   total: number
+  passportEnabled: boolean
   dupDelPhone: boolean
   decisions: Record<number, DupNamesakeDecision>
   aiVerdicts: Record<number, DupAiResult>
@@ -33,6 +35,7 @@ export function DupesPanel({
   groups,
   disputed = [],
   total,
+  passportEnabled,
   dupDelPhone,
   decisions,
   aiVerdicts,
@@ -58,7 +61,8 @@ export function DupesPanel({
   const [showResolved, setShowResolved] = useState(false)
   const visibleDisputed = disputed.filter((_, pairIndex) => showResolved || !decisions[pairIndex])
   const resolvedCount = disputed.length - visibleDisputed.length
-  const aiCount = Object.keys(aiVerdicts).length
+  const aiEligibleCount = disputed.filter((pair) => isAiJudgeablePair(pair)).length
+  const aiCount = Object.entries(aiVerdicts).filter(([index]) => isAiJudgeablePair(disputed[Number(index)] ?? [])).length
 
   return (
     <div className="flex flex-col gap-4">
@@ -87,7 +91,14 @@ export function DupesPanel({
             <caption className="sr-only">Найденные группы дублей</caption>
             <thead>
               <tr className="border-b border-border bg-muted">
-                {["Группа", "Строка", "ФИО", "Телефон", "Совпадение"].map((h) => (
+                {[
+                  "Группа",
+                  "Строка",
+                  "ФИО",
+                  "Телефон",
+                  ...(passportEnabled ? ["Паспорт"] : []),
+                  "Совпадение",
+                ].map((h) => (
                   <th key={h} className="px-3 py-2 text-left font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
                     {h}
                   </th>
@@ -105,6 +116,7 @@ export function DupesPanel({
                     <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{m.excelRow}</td>
                     <td className="px-3 py-1.5">{m.fio || "—"}</td>
                     <td className="px-3 py-1.5 font-mono text-xs">{m.phone || ""}</td>
+                    {passportEnabled && <td className="px-3 py-1.5 font-mono text-xs">{m.passport || ""}</td>}
                     <td className="px-3 py-1.5 text-xs text-muted-foreground">{m.type}</td>
                   </tr>
                 )),
@@ -123,10 +135,10 @@ export function DupesPanel({
         <div className="overflow-x-auto rounded-lg border border-accent/40 bg-accent/5">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-accent/30 px-3 py-2">
             <span className="text-sm font-semibold text-accent-foreground">
-              Спорные тёзки — ручная проверка ({visibleDisputed.length} пар)
+              Спорные случаи — ручная проверка ({visibleDisputed.length} пар)
             </span>
             <div className="flex flex-wrap items-center gap-2">
-              {aiEnabled && (
+              {aiEnabled && aiEligibleCount > 0 && (
                 <button
                   type="button"
                   onClick={onJudgeAll}
@@ -136,7 +148,7 @@ export function DupesPanel({
                   {aiRunning ? "ИИ проверяет…" : "Проверить все пары через ИИ"}
                 </button>
               )}
-              {aiEnabled && aiCount > 0 && (
+              {aiEnabled && aiEligibleCount > 0 && aiCount > 0 && (
                 <button
                   type="button"
                   onClick={onAcceptConfident}
@@ -168,10 +180,18 @@ export function DupesPanel({
           {aiError && <p className="border-b border-destructive/20 px-3 py-2 text-xs text-destructive">{aiError}</p>}
           {visibleDisputed.length > 0 && (
             <table className="w-full border-collapse text-sm">
-              <caption className="sr-only">Спорные тёзки с разными датами рождения</caption>
+              <caption className="sr-only">Спорные тёзки и конфликты паспортов</caption>
               <thead>
                 <tr className="border-b border-accent/20 bg-muted/50">
-                  {["Конфликт", "Строка", "ФИО", "Телефон", "Совпадение", "Решение"].map((h) => (
+                  {[
+                    "Конфликт",
+                    "Строка",
+                    "ФИО",
+                    "Телефон",
+                    ...(passportEnabled ? ["Паспорт"] : []),
+                    "Совпадение",
+                    "Решение",
+                  ].map((h) => (
                     <th key={h} className="px-3 py-2 text-left font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
                       {h}
                     </th>
@@ -187,6 +207,8 @@ export function DupesPanel({
                     const pairKey = namesakePairKey(pair)
                     const decision = decisions[pairIndex]
                     const ai = aiVerdicts[pairIndex]
+                    const aiJudgeable = isAiJudgeablePair(pair)
+                    const confirmedType = manualConfirmedDuplicateType(pair)
                     const aiLabel = ai?.verdict === "same" ? "Один человек" : ai?.verdict === "different" ? "Разные люди" : "Не уверен"
                     const aiStyle = ai?.verdict === "same" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700" : ai?.verdict === "different" ? "border-red-500/40 bg-red-500/10 text-red-700" : "border-muted-foreground/30 bg-muted text-muted-foreground"
                     return (
@@ -200,8 +222,9 @@ export function DupesPanel({
                             <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{m.excelRow}</td>
                             <td className="px-3 py-1.5">{m.fio || "—"}</td>
                             <td className="px-3 py-1.5 font-mono text-xs">{m.phone || ""}</td>
+                            {passportEnabled && <td className="px-3 py-1.5 font-mono text-xs">{m.passport || ""}</td>}
                             <td className="px-3 py-1.5 text-xs font-medium text-accent-foreground">
-                              {memberIndex === 1 && decision === "yes" ? DUP_MANUAL_NAMESAKE_TYPE : m.type}
+                              {memberIndex === 1 && decision === "yes" ? confirmedType : m.type}
                             </td>
                             <td className="px-3 py-1.5">
                               {memberIndex === 1 && (
@@ -227,9 +250,9 @@ export function DupesPanel({
                             </td>
                           </tr>
                         ))}
-                        {aiEnabled && (
+                        {aiEnabled && aiJudgeable && (
                           <tr className="border-b border-accent/20 bg-background/30">
-                            <td colSpan={6} className="px-3 py-2">
+                            <td colSpan={passportEnabled ? 7 : 6} className="px-3 py-2">
                               <div className="flex flex-wrap items-center gap-2">
                                 {ai && <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${aiStyle}`}>{aiLabel} ({ai.confidence}%)</span>}
                                 {!ai && <span className="rounded-full border border-muted-foreground/30 bg-muted px-2.5 py-1 text-xs text-muted-foreground">ИИ ещё не проверял</span>}

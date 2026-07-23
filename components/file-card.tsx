@@ -31,12 +31,14 @@ function ColumnSelect({
   value,
   maxCols,
   rows,
+  hint,
   onChange,
 }: {
   label: string
   value: number
   maxCols: number
   rows: string[][]
+  hint?: string
   onChange: (v: number) => void
 }) {
   return (
@@ -54,6 +56,7 @@ function ColumnSelect({
           )
         })}
       </select>
+      {hint && <span className="text-[11px] leading-relaxed text-muted-foreground">{hint}</span>}
     </label>
   )
 }
@@ -191,19 +194,20 @@ export function FileCard({ index, title, subtitle, file, dimmed, onLoaded }: Fil
                     const isFio = fioCols.includes(c)
                     const isPhone = c === file.cfg.phone
                     const isDob = c === file.cfg.dob
+                    const isPassport = c === file.cfg.passport
                     return (
                       <th
                         key={c}
                         className={`whitespace-nowrap border-b border-border px-1.5 py-1 text-left font-semibold ${
                           isFio
                             ? "bg-primary text-primary-foreground"
-                            : isPhone || isDob
+                            : isPhone || isDob || isPassport
                               ? "bg-accent text-accent-foreground"
                               : "bg-muted text-muted-foreground"
                         }`}
                       >
                         {colLetter(c)}
-                        {isFio ? " ФИО" : isPhone ? " тел" : isDob ? " ДР" : ""}
+                        {isFio ? " ФИО" : isPhone ? " тел" : isDob ? " ДР" : isPassport ? " паспорт" : ""}
                       </th>
                     )
                   })}
@@ -276,6 +280,14 @@ export function FileCard({ index, title, subtitle, file, dimmed, onLoaded }: Fil
             )}
             <ColumnSelect label="Телефон (необязательно)" value={file.cfg.phone} maxCols={maxCols} rows={file.rows} onChange={(v) => updateCfg({ phone: v })} />
             <ColumnSelect label="Дата рождения (необязательно)" value={file.cfg.dob} maxCols={maxCols} rows={file.rows} onChange={(v) => updateCfg({ dob: v })} />
+            <ColumnSelect
+              label="Паспорт (необязательно)"
+              value={file.cfg.passport ?? -1}
+              maxCols={maxCols}
+              rows={file.rows}
+              hint="Серия и номер вместе, 10 цифр. Пробелы и формат не важны."
+              onChange={(v) => updateCfg({ passport: v })}
+            />
           </div>
         </div>
       )}

@@ -7,16 +7,21 @@ export type MatchStatus =
   | "typo"
   | "namechange"
   | "phone"
+  | "passport-conflict"
   | "disputed"
   | "notfound"
   | "empty"
+
+export type MatchMethod = "passport" | "fio" | "phone" | "fio-typo"
 
 export interface MatchResult {
   status: MatchStatus
   matchedName?: string
   matchedDob?: string | null
+  matchedPassport?: string | null
   sim?: number
   reason?: string
+  method?: MatchMethod
 }
 
 export interface Thresholds {
@@ -54,6 +59,18 @@ export function normalizePhone(v: unknown): string | null {
   if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1)
   else if (d.length === 10) d = "7" + d
   return d.length === 11 ? d : null
+}
+
+export function normalizePassport(v: unknown): string | null {
+  let s = normStr(v)
+  if (!s || s.toLowerCase() === "nan") return null
+  // Числовые ячейки Excel иногда приходят в научной нотации.
+  if (/^[\d.,]+e[+-]?\d+$/i.test(s)) {
+    const num = Number(s.replace(",", "."))
+    if (Number.isFinite(num)) s = num.toFixed(0)
+  }
+  const digits = s.replace(/\D/g, "")
+  return digits.length === 10 ? digits : null
 }
 
 export function normalizeName(v: unknown): string | null {
@@ -221,6 +238,7 @@ export interface MatchIndex {
   canon: Set<string>
   phones: Set<string>
   phoneToNames: Map<string, { name: string; dob: string | null }[]>
+  passports: Map<string, { name: string | null; dob: string | null; phone: string | null }>
   nameToDobs: Map<string, string[]>
   /* блокировка: первая буква фамилии -> список метаданных (ускоряет нечёткий поиск) */
   blocks: Map<string, FuzzyMeta[]>
@@ -234,18 +252,26 @@ export function makeIndex(): MatchIndex {
     canon: new Set(),
     phones: new Set(),
     phoneToNames: new Map(),
+    passports: new Map(),
     nameToDobs: new Map(),
     blocks: new Map(),
     count: 0,
   }
 }
 
-export function addToIndex(idx: MatchIndex, rawFio: unknown, rawPhone: unknown, rawDob?: unknown): void {
+export function addToIndex(
+  idx: MatchIndex,
+  rawFio: unknown,
+  rawPhone: unknown,
+  rawDob?: unknown,
+  rawPassport?: unknown,
+): void {
   const nExact = normalizeName(rawFio)
   const nFuzz = normalizeFuzzy(nExact)
   const nCanon = canonicalKey(nFuzz)
   const phone = normalizePhone(rawPhone)
   const dob = normalizeDob(rawDob)
+  const passport = normalizePassport(rawPassport)
 
   if (nExact) idx.exact.add(nExact)
   if (nFuzz) {
@@ -270,7 +296,10 @@ export function addToIndex(idx: MatchIndex, rawFio: unknown, rawPhone: unknown, 
       idx.phoneToNames.get(phone)!.push({ name: nFuzz, dob })
     }
   }
-  if (nExact || phone) idx.count++
+  if (passport && !idx.passports.has(passport)) {
+    idx.passports.set(passport, { name: nFuzz, dob, phone })
+  }
+  if (nExact || phone || passport) idx.count++
 }
 
 /* ================= Каскад сверки ================= */
@@ -280,6 +309,7 @@ export function matchRecord(
   rawFio: unknown,
   rawPhone: unknown,
   rawDob: unknown,
+  rawPassport: unknown,
   th: Thresholds,
   opts?: { nameOnlyScan?: boolean },
 ): MatchResult {
@@ -288,8 +318,44 @@ export function matchRecord(
   const nCanon = canonicalKey(nFuzz)
   const phone = normalizePhone(rawPhone)
   const dob = normalizeDob(rawDob)
+  const passport = normalizePassport(rawPassport)
 
-  if (!nExact && !phone) return { status: "empty" }
+  if (!nExact && !phone && !passport) return { status: "empty" }
+
+  /* 0. Паспорт — самый надёжный идентификатор */
+  if (passport) {
+    const passportHit = idx.passports.get(passport)
+    if (passportHit) {
+      const dbName = passportHit.name
+      const similarity = nFuzz && dbName ? fuzzySim(nFuzz, dbName) : 1
+      const namesCompatible =
+        !nFuzz ||
+        !dbName ||
+        nFuzz === dbName ||
+        canonicalKey(nFuzz) === canonicalKey(dbName) ||
+        similarity >= 0.85
+      if (namesCompatible) {
+        return {
+          status: "exact",
+          matchedName: dbName ?? undefined,
+          matchedDob: passportHit.dob,
+          matchedPassport: passport,
+          sim: similarity,
+          reason: "подтверждено паспортом",
+          method: "passport",
+        }
+      }
+      return {
+        status: "passport-conflict",
+        matchedName: dbName ?? undefined,
+        matchedDob: passportHit.dob,
+        matchedPassport: passport,
+        sim: similarity,
+        reason: "паспорт совпал, ФИО другое — проверьте!",
+        method: "passport",
+      }
+    }
+  }
 
   /* 1. Точное совпадение ФИО (с учётом ё/е и порядка слов) */
   const exactHit =
@@ -307,16 +373,17 @@ export function matchRecord(
           matchedDob: dbDobs[0],
           sim: 1,
           reason: "ФИО совпало, но дата рождения другая — возможен тёзка",
+          method: "fio",
         }
       }
     }
-    return { status: "exact" }
+    return { status: "exact", method: "fio" }
   }
 
   /* 2. Совпадение по телефону */
   if (phone && idx.phones.has(phone)) {
     const cands = idx.phoneToNames.get(phone) || []
-    if (!nFuzz) return { status: "phone" }
+    if (!nFuzz) return { status: "phone", method: "phone" }
     let bestSim = 0
     let bestCand = cands[0] || null
     for (const cand of cands) {
@@ -330,13 +397,14 @@ export function matchRecord(
           matchedDob: cand.dob,
           sim: overall,
           reason: "подтверждено датой рождения",
+          method: "phone",
         }
       }
       if (overall >= th.phoneFuzzy && surnameSim(nFuzz, cand.name) >= th.surname) {
-        return { status: "typo", matchedName: cand.name, matchedDob: cand.dob, sim: overall }
+        return { status: "typo", matchedName: cand.name, matchedDob: cand.dob, sim: overall, method: "phone" }
       }
       if (namePatronymicSim(nFuzz, cand.name) >= th.nameChangeFnp) {
-        return { status: "namechange", matchedName: cand.name, matchedDob: cand.dob, sim: overall }
+        return { status: "namechange", matchedName: cand.name, matchedDob: cand.dob, sim: overall, method: "phone" }
       }
     }
     return {
@@ -345,6 +413,7 @@ export function matchRecord(
       matchedDob: bestCand?.dob ?? null,
       sim: bestSim,
       reason: "телефон совпал, но ФИО сильно отличается",
+      method: "phone",
     }
   }
 
@@ -372,9 +441,10 @@ export function matchRecord(
             matchedDob: dbDobs[0],
             sim: overall,
             reason: "ФИО похоже, но дата рождения другая",
+            method: "fio-typo",
           }
         }
-        return { status: "typo", matchedName: meta.name, matchedDob: dbDobs?.[0] ?? null, sim: overall }
+        return { status: "typo", matchedName: meta.name, matchedDob: dbDobs?.[0] ?? null, sim: overall, method: "fio-typo" }
       }
     }
   }
@@ -389,6 +459,7 @@ export const STATUS_LABEL: Record<MatchStatus, string> = {
   typo: "найден (опечатка)",
   namechange: "найден (смена фамилии?)",
   phone: "телефон совпал",
+  "passport-conflict": "паспорт совпал, ФИО другое",
   disputed: "спорный",
   notfound: "не найден",
   empty: "",
