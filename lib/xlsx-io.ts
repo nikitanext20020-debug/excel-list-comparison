@@ -2,12 +2,12 @@
    Всё выполняется локально в браузере — данные никуда не отправляются. */
 
 import * as XLSX from "xlsx-js-style"
-import { STATUS_LABEL, MATCHED_STATUSES, normalizePhone, type MatchStatus } from "@/lib/matching"
+import { STATUS_LABEL, MATCHED_STATUSES, normalizePhone, normalizePassport, type MatchMethod, type MatchStatus } from "@/lib/matching"
 import type { ColumnConfig, RowResult, DupMember } from "@/workers/match.worker"
 import {
-  DUP_MANUAL_NAMESAKE_TYPE,
   filterAutoDuplicateMembers,
   isDisputedNamesake,
+  manualConfirmedDuplicateType,
   type DupAiResult,
   type DupNamesakeDecision,
 } from "@/lib/dupes"
@@ -59,15 +59,16 @@ export function sheetRawRows(wb: XLSX.WorkBook, sheetName: string): unknown[][] 
 }
 
 export function guessColumns(rows: string[][]): ColumnConfig {
-  const g = { headerRow: -1, fio: -1, fam: -1, im: -1, ot: -1, phone: -1, dob: -1 }
+  const g = { headerRow: -1, fio: -1, fam: -1, im: -1, ot: -1, phone: -1, dob: -1, passport: -1 }
   let bestHits = 0
   const lim = Math.min(rows.length, 10)
   for (let r = 0; r < lim; r++) {
     const row = rows[r] || []
-    const cur = { fio: -1, fam: -1, im: -1, ot: -1, phone: -1, dob: -1 }
+    const cur = { fio: -1, fam: -1, im: -1, ot: -1, phone: -1, dob: -1, passport: -1 }
     let hits = 0
     for (let c = 0; c < row.length; c++) {
       const v = String(row[c] || "").toLowerCase().trim()
+      const compact = v.replace(/[^a-zа-яё0-9]/gi, "")
       if (!v) continue
       if (cur.fio < 0 && (v.includes("фио") || v.includes("ф.и.о") || (v.includes("фамилия") && v.includes("имя")))) { cur.fio = c; hits++; continue }
       if (cur.fam < 0 && v.startsWith("фамил")) { cur.fam = c; hits++; continue }
@@ -75,9 +76,49 @@ export function guessColumns(rows: string[][]): ColumnConfig {
       if (cur.ot < 0 && v.startsWith("отчеств")) { cur.ot = c; hits++; continue }
       if (cur.phone < 0 && (v.includes("телефон") || v.includes("тел.") || v === "тел" || v.includes("номер тел"))) { cur.phone = c; hits++; continue }
       if (cur.dob < 0 && (v.includes("дата рожд") || v.includes("рождения") || v === "д.р." || v === "др" || v.includes("birth"))) { cur.dob = c; hits++; continue }
+      if (
+        cur.passport < 0 &&
+        (v.includes("паспорт") || v === "серия" || compact.includes("серияномер") || v.includes("passport"))
+      ) {
+        cur.passport = c
+        hits++
+        continue
+      }
     }
     if (hits > bestHits) { bestHits = hits; g.headerRow = r; Object.assign(g, cur) }
   }
+
+  // Если явного заголовка паспорта нет, ищем столбец по содержимому:
+  // большинство непустых значений должны давать ровно 10 цифр.
+  if (g.passport < 0) {
+    const dataStart = g.headerRow >= 0 ? g.headerRow + 1 : 0
+    const sample = rows.slice(dataStart, Math.min(rows.length, dataStart + 200))
+    const maxCols = Math.min(Math.max(...sample.map((row) => row.length), 0), 60)
+    let bestColumn = -1
+    let bestRatio = 0
+    let bestValid = 0
+    for (let c = 0; c < maxCols; c++) {
+      if (c === g.phone) continue
+      let nonEmpty = 0
+      let valid = 0
+      for (const row of sample) {
+        const value = row[c]
+        const text = String(value ?? "").trim()
+        if (!text || text.toLowerCase() === "nan") continue
+        nonEmpty++
+        if (normalizePassport(value)) valid++
+      }
+      if (!nonEmpty || valid * 2 <= nonEmpty) continue
+      const ratio = valid / nonEmpty
+      if (ratio > bestRatio || (ratio === bestRatio && valid > bestValid)) {
+        bestColumn = c
+        bestRatio = ratio
+        bestValid = valid
+      }
+    }
+    g.passport = bestColumn
+  }
+
   return {
     start: g.headerRow >= 0 ? g.headerRow + 2 : 2,
     fioMode: g.fio < 0 && g.fam >= 0 && g.im >= 0 ? "three" : "single",
@@ -87,6 +128,7 @@ export function guessColumns(rows: string[][]): ColumnConfig {
     ot: g.ot,
     phone: g.phone,
     dob: g.dob,
+    passport: g.passport,
   }
 }
 
@@ -126,9 +168,21 @@ function toBlob(wb: XLSX.WorkBook): Blob {
 }
 
 export function statusLabelFor(r: RowResult): string {
+  if (r.res.status === "passport-conflict") return r.res.reason || "паспорт совпал, ФИО другое — проверьте!"
   if (r.res.status === "disputed") return `спорный: ${r.res.reason || "требует проверки"}`
   if (r.res.status === "typo" && r.res.reason) return `найден (${r.res.reason})`
   return STATUS_LABEL[r.res.status]
+}
+
+const MATCH_METHOD_LABEL: Record<MatchMethod, string> = {
+  passport: "паспорт",
+  fio: "ФИО",
+  phone: "телефон",
+  "fio-typo": "ФИО с опечаткой",
+}
+
+function matchMethodLabel(r: RowResult): string {
+  return r.res.method ? MATCH_METHOD_LABEL[r.res.method] : ""
 }
 
 /* Покраска: новый чистый файл с данными и цветовой заливкой */
@@ -164,7 +218,7 @@ export function buildColored(
   for (const { excelRow, res } of results) {
     let s: object | null = null
     if (MATCHED_STATUSES.has(res.status)) s = matchS
-    else if (res.status === "disputed") s = orangeS
+    else if (res.status === "disputed" || res.status === "passport-conflict") s = orangeS
     else if (res.status === "notfound" && opts.paintRed) s = redS
     if (!s) continue
     for (let c = 0; c <= lastC; c++) {
@@ -185,6 +239,7 @@ export function buildExport(
   cfg: ColumnConfig,
   results: RowResult[],
   what: "found" | "notfound" | "both",
+  opts: { passportEnabled?: boolean } = {},
 ): Blob {
   const headerIdx = cfg.start - 2
   const srcHeader = headerIdx >= 0 ? rows[headerIdx] || [] : []
@@ -194,6 +249,7 @@ export function buildExport(
     const v = String(srcHeader[c] || "").trim()
     headers.push(v || colLetter(c))
   }
+  if (opts.passportEnabled) headers.push("Паспорт", "Как найден")
   headers.push("Результат сверки")
   const wb = XLSX.utils.book_new()
   const addSheet = (title: string, rowsList: RowResult[]) => {
@@ -202,6 +258,7 @@ export function buildExport(
       const src = rows[r.excelRow - 1] || []
       const vals: (string | number)[] = []
       for (let c = 0; c < maxCols; c++) vals.push(src[c] ?? "")
+      if (opts.passportEnabled) vals.push(r.passport || "", matchMethodLabel(r))
       vals.push(statusLabelFor(r))
       aoa.push(vals)
     }
@@ -217,9 +274,11 @@ export function buildExport(
   const found = results.filter((r) => MATCHED_STATUSES.has(r.res.status))
   const notfound = results.filter((r) => r.res.status === "notfound")
   const disputed = results.filter((r) => r.res.status === "disputed")
+  const passportConflicts = results.filter((r) => r.res.status === "passport-conflict")
   if (what === "found" || what === "both") addSheet("Найдены", found)
   if (what === "notfound" || what === "both") addSheet("Не найдены", notfound)
   if (disputed.length) addSheet("Спорные", disputed)
+  if (passportConflicts.length) addSheet("Паспорт совпал, ФИО другое", passportConflicts)
   if (!wb.SheetNames.length) addSheet("Пусто", [])
   return toBlob(wb)
 }
@@ -229,6 +288,7 @@ export interface DupesReportOptions {
   manualSamePairs?: DupMember[][]
   aiVerdicts?: Record<number, DupAiResult>
   decisions?: Record<number, DupNamesakeDecision>
+  includePassport?: boolean
 }
 
 export function buildDupesFile(
@@ -236,7 +296,9 @@ export function buildDupesFile(
   disputed: DupMember[][] = [],
   options: DupesReportOptions = {},
 ): Blob {
-  const headers = ["Группа", "Строка в файле", "ФИО", "Телефон", "Совпадение"]
+  const headers = options.includePassport
+    ? ["Группа", "Строка в файле", "ФИО", "Телефон", "Паспорт", "Совпадение"]
+    : ["Группа", "Строка в файле", "ФИО", "Телефон", "Совпадение"]
   const aoa: (string | number)[][] = [headers]
   const shade: boolean[] = []
   const groupStart: boolean[] = []
@@ -249,7 +311,11 @@ export function buildDupesFile(
     const autoMembers = filterAutoDuplicateMembers(grp)
     let first = true
     for (const m of autoMembers) {
-      aoa.push([g, m.excelRow, m.fio || "", m.phone || "", m.type])
+      aoa.push(
+        options.includePassport
+          ? [g, m.excelRow, m.fio || "", m.phone || "", m.passport || "", m.type]
+          : [g, m.excelRow, m.fio || "", m.phone || "", m.type],
+      )
       shade.push(g % 2 === 0)
       groupStart.push(first)
       first = false
@@ -258,13 +324,18 @@ export function buildDupesFile(
   }
   for (const pair of options.manualSamePairs ?? []) {
     if (!pair[0] || !pair[1]) continue
+    const confirmedType = manualConfirmedDuplicateType(pair)
     const manualGroup = [
       { ...pair[0], type: "первое упоминание" },
-      { ...pair[1], type: DUP_MANUAL_NAMESAKE_TYPE },
+      { ...pair[1], type: confirmedType },
     ]
     let first = true
     for (const m of manualGroup) {
-      aoa.push([g, m.excelRow, m.fio || "", m.phone || "", m.type])
+      aoa.push(
+        options.includePassport
+          ? [g, m.excelRow, m.fio || "", m.phone || "", m.passport || "", m.type]
+          : [g, m.excelRow, m.fio || "", m.phone || "", m.type],
+      )
       shade.push(g % 2 === 0)
       groupStart.push(first)
       first = false
@@ -298,6 +369,7 @@ export function buildDupesFile(
       "Строка в файле",
       "ФИО",
       "Телефон",
+      ...(options.includePassport ? ["Паспорт"] : []),
       "Совпадение",
       "Вердикт ИИ",
       "Уверенность",
@@ -310,13 +382,29 @@ export function buildDupesFile(
       const aiLabel = ai?.verdict === "same" ? "Один человек" : ai?.verdict === "different" ? "Разные люди" : ai?.verdict === "unsure" ? "Не уверен" : ""
       const decisionLabel = options.decisions?.[pairIndex] === "yes" ? "один человек" : options.decisions?.[pairIndex] === "no" ? "разные люди" : ""
       for (const member of pair) {
-        disputedAoa.push([member.excelRow, member.fio || "", member.phone || "", member.type, aiLabel, ai?.confidence ?? "", ai?.reason || "", decisionLabel])
+        const values: (string | number)[] = [
+          member.excelRow,
+          member.fio || "",
+          member.phone || "",
+        ]
+        if (options.includePassport) values.push(member.passport || "")
+        values.push(
+          member.type,
+          aiLabel,
+          ai?.confidence ?? "",
+          ai?.reason || "",
+          decisionLabel,
+        )
+        disputedAoa.push(values)
       }
     }
     const reportedRows = new Set(disputed.flat().map((member) => member.excelRow))
     for (const member of disputedRows) {
       if (reportedRows.has(member.excelRow)) continue
-      disputedAoa.push([member.excelRow, member.fio || "", member.phone || "", member.type, "", "", "", ""])
+      const values: (string | number)[] = [member.excelRow, member.fio || "", member.phone || ""]
+      if (options.includePassport) values.push(member.passport || "")
+      values.push(member.type, "", "", "", "")
+      disputedAoa.push(values)
     }
     const disputedWs = XLSX.utils.aoa_to_sheet(disputedAoa)
     for (let c = 0; c < disputedHeaders.length; c++) {
@@ -691,14 +779,15 @@ export function buildCleanFile(
     const kept = pair[0]
     const duplicate = pair[1]
     if (!kept || !duplicate) continue
+    const confirmedType = manualConfirmedDuplicateType(pair)
     const alreadyScheduled = del.has(duplicate.excelRow)
-    del.set(duplicate.excelRow, { g, type: DUP_MANUAL_NAMESAKE_TYPE })
+    del.set(duplicate.excelRow, { g, type: confirmedType })
     if (opts.withLog && !alreadyScheduled) {
       groupsForLog.push({
         groupNum: g,
         kept: kept.excelRow,
         deleted: [duplicate.excelRow],
-        type: DUP_MANUAL_NAMESAKE_TYPE,
+        type: confirmedType,
       })
     }
     g++

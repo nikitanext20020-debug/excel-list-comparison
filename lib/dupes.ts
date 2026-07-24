@@ -2,6 +2,8 @@
  * но заполненные даты рождения у записей различаются. */
 export const DUP_NAMESAKE_TYPE = "тёзка? (другая дата рождения)"
 export const DUP_MANUAL_NAMESAKE_TYPE = "одинаковое ФИО (ДР отличается, подтверждено вручную/ИИ)"
+export const DUP_PASSPORT_CONFLICT_TYPE = "паспорт одинаковый, ФИО разное — проверьте"
+export const DUP_MANUAL_PASSPORT_TYPE = "одинаковый паспорт (подтверждено вручную)"
 
 export type DupNamesakeDecision = "yes" | "no"
 
@@ -32,6 +34,20 @@ export function manualDuplicateRows(
 
 export function isDisputedNamesake(type: string): boolean {
   return type === DUP_NAMESAKE_TYPE
+}
+
+export function isPassportConflict(type: string): boolean {
+  return type === DUP_PASSPORT_CONFLICT_TYPE
+}
+
+export function isAiJudgeablePair(pair: { type: string }[]): boolean {
+  return pair.some((member) => isDisputedNamesake(member.type))
+}
+
+export function manualConfirmedDuplicateType(pair: { type: string }[]): string {
+  return pair.some((member) => isPassportConflict(member.type))
+    ? DUP_MANUAL_PASSPORT_TYPE
+    : DUP_MANUAL_NAMESAKE_TYPE
 }
 
 /** Общая фильтрация строк, которые относятся к автоматическим дублям. */

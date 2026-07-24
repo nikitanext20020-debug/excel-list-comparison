@@ -10,7 +10,7 @@ import { AiAssistant } from "@/components/ai-assistant"
 import { SwapFilesButton } from "@/components/swap-files-button"
 import type { LoadedFile } from "@/lib/xlsx-io"
 import { buildColored, buildExport, buildDupesFile, buildCleanFile, buildPhoneReportFile, buildPhoneCleanFile, downloadBlob } from "@/lib/xlsx-io"
-import { type DupAiResult, type DupNamesakeDecision } from "@/lib/dupes"
+import { isAiJudgeablePair, type DupAiResult, type DupNamesakeDecision } from "@/lib/dupes"
 import type { Strictness } from "@/lib/matching"
 import type { RowResult, DupMember, WorkerResponse, WorkerRequest, ColumnConfig } from "@/workers/match.worker"
 
@@ -237,7 +237,10 @@ export default function Page() {
 
   async function judgePairIndices(indices: number[]) {
     if (!dupAiEnabled || dupAiRunning || !fileA || !dupes) return
-    const target = [...new Set(indices)].filter((index) => !!dupes.disputed[index])
+    const target = [...new Set(indices)].filter((index) => {
+      const pair = dupes.disputed[index]
+      return !!pair && isAiJudgeablePair(pair)
+    })
     if (!target.length) return
     setDupAiRunning(true)
     setDupAiError(null)
@@ -300,7 +303,12 @@ export default function Page() {
       if (mode === "color") {
         downloadBlob(buildColored(fileA.rows, fileA.cfg, results, matchColor, { addLabel, paintRed }), base + "_РЕЗУЛЬТАТ.xlsx")
       } else {
-        downloadBlob(buildExport(fileA.rows, fileA.cfg, results, expWhat), base + "_СВЕРКА.xlsx")
+        downloadBlob(
+          buildExport(fileA.rows, fileA.cfg, results, expWhat, {
+            passportEnabled: fileA.cfg.passport >= 0 && (fileB?.cfg.passport ?? -1) >= 0,
+          }),
+          base + "_СВЕРКА.xlsx",
+        )
       }
       setDownloadNote("Файл скачан.")
     } catch (e) {
@@ -316,6 +324,7 @@ export default function Page() {
       manualSamePairs: samePairs,
       aiVerdicts: dupAiVerdicts,
       decisions: dupDecisions,
+      includePassport: fileA.cfg.passport >= 0,
     }), base + "_ДУБЛИ.xlsx")
     setDownloadNote("Отчёт по дублям скачан.")
   }
@@ -355,6 +364,9 @@ export default function Page() {
   const disputedLeft = compareRes
     ? compareRes.results.filter((r) => r.res.status === "disputed" && !decisions[r.excelRow]).length
     : 0
+  const passportConflictCount = compareRes
+    ? compareRes.results.filter((r) => r.res.status === "passport-conflict").length
+    : 0
   const acceptedDupNamesakes = dupes
     ? dupes.disputed.filter((_, index) => dupDecisions[index] === "yes").length
     : 0
@@ -369,7 +381,7 @@ export default function Page() {
               className="text-sm font-normal text-primary"
               style={{ WebkitTextFillColor: "var(--primary)", fontFamily: "system-ui", marginLeft: "10px" }}
             >
-              <BlurInText text="фио · телефон · дата рождения" />
+              <BlurInText text="паспорт · фио · телефон · дата рождения" />
             </span>
           </h1>
           <div className="flex flex-wrap items-center gap-3">
@@ -638,6 +650,7 @@ export default function Page() {
               <ResultsPanel
                 results={compareRes.results}
                 dbCount={compareRes.dbCount}
+                passportEnabled={fileA!.cfg.passport >= 0 && fileB!.cfg.passport >= 0}
                 decisions={decisions}
                 onDecide={(row, d) =>
                   setDecisions((prev) => {
@@ -661,6 +674,11 @@ export default function Page() {
                     Спорных без решения: {disputedLeft} — они попадут в файл со статусом «спорный».
                   </p>
                 )}
+                {passportConflictCount > 0 && (
+                  <p className="text-xs text-accent-foreground">
+                    Конфликтов паспорта: {passportConflictCount} — они выделены оранжевым и не считаются найденными.
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -671,6 +689,7 @@ export default function Page() {
                 groups={dupes.groups}
                 disputed={dupes.disputed}
                 total={dupes.total}
+                passportEnabled={fileA!.cfg.passport >= 0}
                 dupDelPhone={dupDelPhone}
                 decisions={dupDecisions}
                 aiVerdicts={dupAiVerdicts}
@@ -678,7 +697,13 @@ export default function Page() {
                 aiRunning={dupAiRunning}
                 aiProgress={dupAiProgress}
                 aiError={dupAiError}
-                onJudgeAll={() => judgePairIndices(dupes.disputed.map((_, index) => index))}
+                onJudgeAll={() =>
+                  judgePairIndices(
+                    dupes.disputed
+                      .map((pair, index) => (isAiJudgeablePair(pair) ? index : -1))
+                      .filter((index) => index >= 0),
+                  )
+                }
                 onJudgePair={(pairIndex) => judgePairIndices([pairIndex])}
                 onAcceptConfident={acceptConfidentAiVerdicts}
                 onDecide={(pairIndex, decision) =>
@@ -780,12 +805,17 @@ export default function Page() {
             parts.push(
               `Результат сверки (режим: ${mode}, строгость: ${strictness}): всего ${compareRes.results.length} строк. ` +
                 `Найдено точно: ${count("exact")}, с опечаткой: ${count("typo")}, смена фамилии: ${count("namechange")}, ` +
-                `по телефону: ${count("phone")}, спорных: ${count("disputed")}, не найдено: ${count("notfound")}. База: ${compareRes.dbCount} строк.`,
+                `по телефону: ${count("phone")}, конфликтов паспорта: ${count("passport-conflict")}, спорных: ${count("disputed")}, ` +
+                `не найдено: ${count("notfound")}. База: ${compareRes.dbCount} строк.`,
             )
             const detail = compareRes.results
-              .filter((r) => r.res.status === "disputed" || r.res.status === "notfound")
+              .filter((r) => r.res.status === "passport-conflict" || r.res.status === "disputed" || r.res.status === "notfound")
               .slice(0, 120)
-              .map((r) => `строка ${r.excelRow}: ${r.fio} — ${r.res.status === "disputed" ? `спорный (${r.res.reason ?? "?"})` : "не найден"}`)
+              .map((r) => {
+                if (r.res.status === "passport-conflict") return `строка ${r.excelRow}: ${r.fio} — конфликт паспорта (${r.res.reason ?? "?"})`
+                if (r.res.status === "disputed") return `строка ${r.excelRow}: ${r.fio} — спорный (${r.res.reason ?? "?"})`
+                return `строка ${r.excelRow}: ${r.fio} — не найден`
+              })
             if (detail.length) parts.push(`Спорные и не найденные:\n${detail.join("\n")}`)
           }
           if (dupes) parts.push(`Поиск дублей: групп ${dupes.groups.length}, спорных тёзок ${dupes.disputed.length}, всего строк ${dupes.total}.`)
@@ -796,7 +826,7 @@ export default function Page() {
       <footer className="border-t border-border/60">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-6 xl:px-0">
           <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
-            Сверка учитывает ё/е, порядок слов, опечатки, смену фамилии по телефону и тёзок по дате рождения. Обработка идёт в
+            Сверка учитывает паспорт, ё/е, порядок слов, опечатки, смену фамилии по телефону и тёзок по дате рождения. Обработка идёт в
             отдельном потоке браузера — интерфейс не замирает даже на больших файлах.
           </p>
           <p className="font-rubik text-xs text-muted-foreground">

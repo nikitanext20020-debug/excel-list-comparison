@@ -9,6 +9,7 @@ export type Decision = "yes" | "no"
 interface ResultsPanelProps {
   results: RowResult[]
   dbCount: number
+  passportEnabled: boolean
   decisions: Record<number, Decision>
   onDecide: (excelRow: number, d: Decision | null) => void
 }
@@ -19,6 +20,7 @@ const STATUS_META: Record<MatchStatus, { label: string; tone: "green" | "amber" 
   typo: { label: "опечатка", tone: "green" },
   namechange: { label: "смена фамилии", tone: "green" },
   phone: { label: "по телефону", tone: "green" },
+  "passport-conflict": { label: "паспорт совпал, ФИО другое", tone: "amber" },
   disputed: { label: "спорное", tone: "amber" },
   notfound: { label: "не найдено", tone: "red" },
   empty: { label: "пусто", tone: "amber" },
@@ -66,10 +68,10 @@ function Stat({
   )
 }
 
-type FilterKey = "all" | "found" | "disputed" | "notfound"
+type FilterKey = "all" | "found" | "passport-conflict" | "disputed" | "notfound"
 type SortKey = "row" | "sim-desc" | "sim-asc"
 
-export function ResultsPanel({ results, dbCount, decisions, onDecide }: ResultsPanelProps) {
+export function ResultsPanel({ results, dbCount, passportEnabled, decisions, onDecide }: ResultsPanelProps) {
   const [filter, setFilter] = useState<FilterKey>("all")
   const [sort, setSort] = useState<SortKey>("row")
   const [query, setQuery] = useState("")
@@ -78,6 +80,7 @@ export function ResultsPanel({ results, dbCount, decisions, onDecide }: ResultsP
   let notfound = 0
   let disputedLeft = 0
   const disputed: RowResult[] = []
+  const passportConflicts: RowResult[] = []
   for (const r of results) {
     if (r.res.status === "disputed") {
       disputed.push(r)
@@ -85,7 +88,8 @@ export function ResultsPanel({ results, dbCount, decisions, onDecide }: ResultsP
       if (d === "yes") found++
       else if (d === "no") notfound++
       else disputedLeft++
-    } else if (MATCHED_STATUSES.has(r.res.status)) found++
+    } else if (r.res.status === "passport-conflict") passportConflicts.push(r)
+    else if (MATCHED_STATUSES.has(r.res.status)) found++
     else if (r.res.status === "notfound") notfound++
   }
 
@@ -96,9 +100,10 @@ export function ResultsPanel({ results, dbCount, decisions, onDecide }: ResultsP
       const st = effectiveStatus(r, decisions)
       if (filter === "found" && !MATCHED_STATUSES.has(st)) return false
       if (filter === "notfound" && st !== "notfound") return false
+      if (filter === "passport-conflict" && st !== "passport-conflict") return false
       if (filter === "disputed" && !(r.res.status === "disputed" && !decisions[r.excelRow])) return false
       if (q) {
-        const hay = `${r.fio} ${r.phone} ${r.dob} ${r.res.matchedName ?? ""}`.toLowerCase()
+        const hay = `${r.fio} ${r.phone} ${r.dob} ${r.passport} ${r.res.matchedName ?? ""}`.toLowerCase()
         if (!hay.includes(q)) return false
       }
       return true
@@ -119,21 +124,52 @@ export function ResultsPanel({ results, dbCount, decisions, onDecide }: ResultsP
   const filters: { key: FilterKey; label: string; count: number }[] = [
     { key: "all", label: "Все", count: results.length },
     { key: "found", label: "Найдены", count: found },
+    ...(passportEnabled
+      ? [{ key: "passport-conflict" as const, label: "Конфликт паспорта", count: passportConflicts.length }]
+      : []),
     { key: "disputed", label: "Спорные", count: disputedLeft },
     { key: "notfound", label: "Не найдены", count: notfound },
   ]
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className={`grid grid-cols-2 gap-3 ${passportEnabled ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>
         <Stat value={results.length} label="строк проверено" tone="plain" />
         <Stat value={found} total={results.length} label="найдено в базе" tone="green" />
+        {passportEnabled && <Stat value={passportConflicts.length} total={results.length} label="конфликтов паспорта" tone="amber" />}
         <Stat value={disputedLeft} total={results.length} label="спорных без решения" tone="amber" />
         <Stat value={notfound} total={results.length} label="не найдено" tone="red" />
       </div>
       <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
         база: {dbCount.toLocaleString("ru-RU")} записей
       </p>
+
+      {passportEnabled && passportConflicts.length > 0 && (
+        <div className="rounded-lg border border-accent-foreground/25 bg-accent/40">
+          <header className="border-b border-accent-foreground/20 px-4 py-3">
+            <h4 className="text-sm font-semibold text-accent-foreground">
+              Паспорт совпал, ФИО другое — проверьте ({passportConflicts.length})
+            </h4>
+          </header>
+          <ul className="divide-y divide-accent-foreground/15">
+            {passportConflicts.map((r) => (
+              <li key={r.excelRow} className="flex flex-col gap-1 px-4 py-3">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <span className="font-mono text-[11px] text-muted-foreground">стр. {r.excelRow}</span>
+                  <span className="text-sm font-medium">{r.fio || "(без ФИО)"}</span>
+                  {r.passport && <span className="font-mono text-xs text-muted-foreground">паспорт {r.passport}</span>}
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
+                  <span>в базе:</span>
+                  <span className="font-medium text-foreground">{r.res.matchedName || "—"}</span>
+                  {typeof r.res.sim === "number" && <span className="font-mono">{Math.round(r.res.sim * 100)}%</span>}
+                  <span>· {r.res.reason || "требует проверки"}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {disputed.length > 0 && (
         <div className="rounded-lg border border-accent-foreground/25 bg-accent/40">
@@ -154,6 +190,7 @@ export function ResultsPanel({ results, dbCount, decisions, onDecide }: ResultsP
                       <span className="text-sm font-medium">{r.fio || "(без ФИО)"}</span>
                       {r.phone && <span className="font-mono text-xs text-muted-foreground">{r.phone}</span>}
                       {r.dob && <span className="font-mono text-xs text-muted-foreground">ДР {r.dob}</span>}
+                      {passportEnabled && r.passport && <span className="font-mono text-xs text-muted-foreground">паспорт {r.passport}</span>}
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
                       <span>в базе:</span>
@@ -229,7 +266,7 @@ export function ResultsPanel({ results, dbCount, decisions, onDecide }: ResultsP
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Поиск по ФИО, телефону, ДР…"
+              placeholder={passportEnabled ? "Поиск по ФИО, телефону, ДР, паспорту…" : "Поиск по ФИО, телефону, ДР…"}
               aria-label="Поиск по результатам"
               className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/60"
             />
@@ -263,6 +300,7 @@ export function ResultsPanel({ results, dbCount, decisions, onDecide }: ResultsP
                         <span className="truncate text-sm font-medium">{r.fio || "(без ФИО)"}</span>
                         {r.phone && <span className="font-mono text-xs text-muted-foreground">{r.phone}</span>}
                         {r.dob && <span className="font-mono text-xs text-muted-foreground">ДР {r.dob}</span>}
+                        {passportEnabled && r.passport && <span className="font-mono text-xs text-muted-foreground">паспорт {r.passport}</span>}
                       </div>
                       {r.res.matchedName && (
                         <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
